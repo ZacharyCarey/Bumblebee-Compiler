@@ -62,7 +62,7 @@ namespace Bumblebee_Compiler {
         }
 
         private void ParseToken(IEnumerator<Token> iter) {
-            if (iter.Current is LiteralToken literal) {
+            /*if (iter.Current is LiteralToken literal) {
                 if (literal.Value != "print") throw new Exception("Bad literal.");
                 AddRequirements("printf");
                 
@@ -75,7 +75,7 @@ namespace Bumblebee_Compiler {
 
             } else {
                 throw new Exception("Unexpected token.");
-            }
+            }*/
         }
 
         private void AddRequirements(string name) {

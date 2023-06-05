@@ -5,9 +5,27 @@ using System.Text;
 using System.Threading.Tasks;
 
 namespace Bumblebee_Compiler.Tokens {
-    internal abstract class Token {
+    internal struct Token {
 
-        abstract internal void Parse(string input);
+        internal TokenType Type;
+        internal string Value;
 
+        public Token() {
+            this.Type = TokenType.Literal;
+            this.Value = "";
+        }
+
+        public Token(TokenType type, string value) {
+            this.Type = type;
+            this.Value = value;
+        }
+
+    }
+
+    internal enum TokenType {
+        Parenth,
+        Number,
+        Literal,
+        Operator
     }
 }
