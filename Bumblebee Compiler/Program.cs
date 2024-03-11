@@ -3,16 +3,25 @@ using Bumblebee_Compiler;
 using Bumblebee_Compiler.Tokens;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
+using System.Text.RegularExpressions;
+
+string text = File.ReadAllText("TestPrograms/TuringCompleteAiShowdown.bee");
+
 
 // Read the text file into an array of objects with basic types
-List<Token> tokens;
-using (StreamReader reader = new(File.OpenRead("Program.bee"))) {
-    tokens = new Tokenizer(reader).ParseTokens().ToList();
+List<Token> tokens = new Tokenizer().ParseTokens(text).ToList();
+
+foreach(var token in tokens) {
+    Console.WriteLine(token);
 }
 
 // Transform the tokens into an AST (array of objects) which represent the program
 var parser = new Parser();
-parser.StaticAnalyze(tokens);
+parser.SyntaxAnalyzer(tokens);
+
+Console.WriteLine(parser.AST.Params.Count);
+
+return;
 
 // Transform the original Bumblebee AST code into Assembly AST code
 var transformer = new Transformer();

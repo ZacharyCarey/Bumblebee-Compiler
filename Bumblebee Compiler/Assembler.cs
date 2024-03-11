@@ -16,7 +16,7 @@ namespace Bumblebee_Compiler {
         }
 
         internal void Assemble() {
-            // Boiler plate
+ /*           // Boiler plate
             writer.WriteLine("; Compiler settings");
             writer.WriteLine(".386");
             writer.WriteLine(".model flat, stdcall");
@@ -83,7 +83,7 @@ namespace Bumblebee_Compiler {
             writer.WriteLine("main endp");
             writer.WriteLine("END main");
 
-            writer.Flush();
+            writer.Flush();*/
         }
 
     }

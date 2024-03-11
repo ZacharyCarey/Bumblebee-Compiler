@@ -1,0 +1,20 @@
+uint8[15] foods;
+
+for(uint8 i = 0; i < foods.Length; i++) {
+	foods[i] = input;
+}
+
+// Bad bubble sort
+for (uint8 i = 0; i < foods.Length - 1; i++) {
+	for (uint8 j = 1; j <= foods.Length - 1; j++) {
+		if (foods[i - 1] > foods[i]) {
+			swap(i - 1, i);
+		}
+	}
+}
+
+void swap(uint8 i, uint8 j) {
+	uint8 temp = foods[i];
+	foods[i] = foods[j];
+	foods[j] = temp;
+}

@@ -10,22 +10,23 @@ namespace Bumblebee_Compiler.Tokens {
         internal TokenType Type;
         internal string Value;
 
-        public Token() {
-            this.Type = TokenType.Literal;
-            this.Value = "";
-        }
-
         public Token(TokenType type, string value) {
             this.Type = type;
             this.Value = value;
         }
 
+        public override string ToString() {
+            return $"[Type: {Type}, Value: '{Value}']";
+        }
     }
 
     internal enum TokenType {
-        Parenth,
+        Paren,
+        Identifier,
+        //Whitespace,
+        Comment,
         Number,
-        Literal,
+        LineDelimiter,
         Operator
     }
 }
