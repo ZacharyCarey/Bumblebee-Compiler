@@ -5,8 +5,10 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Bumblebee_Compiler {
-    internal class Compiler {
+namespace Bumblebee_Compiler.Targets.masm32
+{
+    internal class Masm32Compiler
+    {
 
         internal HashSet<string> Includes = new() {
             "windows",
@@ -45,13 +47,15 @@ namespace Bumblebee_Compiler {
             { "printf", new string[]{ "fmt db \"%d\", 10, 0" } }
         };
 
-        internal void Compile(IEnumerable<Token> tokens) {
+        internal void Compile(IEnumerable<Token> tokens)
+        {
             // Setup main func
             Code.Add("main proc");
 
             // Parse tokens
             IEnumerator<Token> iter = tokens.GetEnumerator();
-            while (iter.MoveNext()) {
+            while (iter.MoveNext())
+            {
                 ParseToken(iter);
             }
 
@@ -61,7 +65,8 @@ namespace Bumblebee_Compiler {
             Code.Add("END main");
         }
 
-        private void ParseToken(IEnumerator<Token> iter) {
+        private void ParseToken(IEnumerator<Token> iter)
+        {
             /*if (iter.Current is LiteralToken literal) {
                 if (literal.Value != "print") throw new Exception("Bad literal.");
                 AddRequirements("printf");
@@ -78,17 +83,22 @@ namespace Bumblebee_Compiler {
             }*/
         }
 
-        private void AddRequirements(string name) {
-            foreach(string include in FunctionIncludes[name]) {
+        private void AddRequirements(string name)
+        {
+            foreach (string include in FunctionIncludes[name])
+            {
                 Includes.Add(include);
             }
-            foreach(string lib in FunctionLibs[name]) {
+            foreach (string lib in FunctionLibs[name])
+            {
                 Libs.Add(lib);
             }
-            foreach(string prototype in FunctionPrototypes[name]) {
+            foreach (string prototype in FunctionPrototypes[name])
+            {
                 Prototypes.Add(prototype);
             }
-            foreach(string data in FunctionData[name]) {
+            foreach (string data in FunctionData[name])
+            {
                 Data.Add(data);
             }
         }

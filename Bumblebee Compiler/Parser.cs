@@ -67,10 +67,10 @@ namespace Bumblebee_Compiler {
      *  Value = null
      *  params[n] = DeclarationStatement or ExpressionAssignmentStatement or ExpressionStatement or StatementBlock
      */
-    internal class ASTNode {
-        internal ASTType Type;
-        internal List<ASTNode> Params;
-        internal string Value;
+    public class ASTNode {
+        public ASTType Type;
+        public List<ASTNode> Params;
+        public string Value;
 
         internal ASTNode(ASTType type) {
             this.Type = type;
@@ -85,7 +85,7 @@ namespace Bumblebee_Compiler {
         }
     }
 
-    internal enum ASTType {
+    public enum ASTType {
         StatementBlock,
         DeclarationStatement,
         ExpressionAssignmentStatement,
