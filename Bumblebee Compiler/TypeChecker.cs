@@ -29,11 +29,16 @@ namespace Bumblebee_Compiler {
                     return "void";
                 case ASTType.ExpressionOperator:
                     return walkExpressionOperator(root);
-                case ASTType.ExpressionNumber:
-                    return walkExpressionNumber(root);
+                case ASTType.NumberLiteral:
+                    return walkNumberLiteral(root);
                 case ASTType.ExpressionIdentifier:
                     return walkExpressionIdentifier(root, false, true);
                 case ASTType.Comment:
+                    return "void";
+                case ASTType.BoolLiteral:
+                    return walkBoolLiteral(root);
+                case ASTType.IterationStatement:
+                    walkIterationStatement(root);
                     return "void";
                 default:
                     throw new Exception("Unknown statement.");
@@ -87,32 +92,77 @@ namespace Bumblebee_Compiler {
             string leftType = "void";
             if (left.Type == ASTType.ExpressionOperator) {
                 leftType = walkExpressionOperator(left);
-            } else if (left.Type == ASTType.ExpressionNumber) {
-                leftType = walkExpressionNumber(left);
+            } else if (left.Type == ASTType.NumberLiteral) {
+                leftType = walkNumberLiteral(left);
+            } else if (left.Type == ASTType.BoolLiteral) {
+                leftType = walkBoolLiteral(left);
             } else if (left.Type == ASTType.ExpressionIdentifier) {
                 leftType = walkExpressionIdentifier(left, false, true);
             }
             if (leftType == "void") throw new Exception("Argument can't be void.");
 
-            if (root.Value != "!") {
+            string rightType = "void";
+            if (root.Value != "~" && root.Value != "not") {
                 ASTNode right = root.Params[1];
-                string rightType = "void";
                 if (right.Type == ASTType.ExpressionOperator) {
                     rightType = walkExpressionOperator(right);
-                } else if (right.Type == ASTType.ExpressionNumber) {
-                    rightType = walkExpressionNumber(right);
+                } else if (right.Type == ASTType.NumberLiteral) {
+                    rightType = walkNumberLiteral(right);
+                } else if (right.Type == ASTType.BoolLiteral) {
+                    rightType = walkBoolLiteral(right);
                 } else if (right.Type == ASTType.ExpressionIdentifier) {
                     rightType = walkExpressionIdentifier(right, false, true);
                 }
                 if (rightType == "void") throw new Exception("Argument can't be void.");
             }
 
+            switch(root.Value) {
+                case "+":
+                case "-":
+                case "*":
+                case "/":
+                case "%":
+                case "&":
+                case "|":
+                case "^":
+                case ">>":
+                case "<<":
+                    if (leftType != "uint8") throw new Exception($"Operator {root.Value} requires int type operand.");
+                    if (rightType != "uint8") throw new Exception($"Operator {root.Value} requires int type operand.");
+                    return "uint8";
+                case "~":
+                    if (leftType != "uint8") throw new Exception($"Operator {root.Value} requires int type operand.");
+                    return "uint8";
+                case "and":
+                case "or":
+                case "xor":
+                    if (leftType != "bool") throw new Exception($"Operator {root.Value} requires bool type operand.");
+                    if (rightType != "bool") throw new Exception($"Operator {root.Value} requires bool type operand.");
+                    return "bool";
+                case "not":
+                    if (leftType != "bool") throw new Exception($"Operator {root.Value} requires bool type operand.");
+                    return "bool";
+                case ">":
+                case "<":
+                case "<=":
+                case ">=":
+                case "==":
+                    if (leftType != "uint8") throw new Exception($"Operator {root.Value} requires int type operand.");
+                    if (rightType != "uint8") throw new Exception($"Operator {root.Value} requires int type operand.");
+                    return "bool";
+                default:
+                    throw new Exception("Unknown operator");
+            }
+        }
+
+        string walkNumberLiteral(ASTNode root) {
+            if (root.Type != ASTType.NumberLiteral) throw new Exception("Expected number literal.");
             return "uint8";
         }
 
-        string walkExpressionNumber(ASTNode root) {
-            if (root.Type != ASTType.ExpressionNumber) throw new Exception("Expected number literal.");
-            return "uint8";
+        string walkBoolLiteral(ASTNode root) {
+            if (root.Type != ASTType.BoolLiteral) throw new Exception("Expected bool literal.");
+            return "bool";
         }
 
         string walkExpressionIdentifier(ASTNode root, bool isWriting, bool isReading) {
@@ -125,7 +175,31 @@ namespace Bumblebee_Compiler {
             return variable.TypeName;
         }
 
-        void walkExpressionIdexer(ASTNode root) {
+        void walkIterationStatement(ASTNode root) {
+            if (root.Type != ASTType.IterationStatement) throw new Exception("Iteration expected");
+            if (root.Value != "while") throw new Exception("Unknown iteration");
+
+            string conditionType = "void";
+            switch(root.Params[0].Type) {
+                case ASTType.BoolLiteral:
+                    conditionType = walkBoolLiteral(root.Params[0]);
+                    break;
+                case ASTType.ExpressionOperator:
+                    conditionType = walkExpressionOperator(root.Params[0]);
+                    break;
+                case ASTType.ExpressionIdentifier:
+                    conditionType = walkExpressionIdentifier(root.Params[0], false, true);
+                    break;
+                // TODO expression indexer
+                default:
+                    throw new Exception("Invalid condition.");
+            }
+
+            if (conditionType != "bool") throw new Exception("Condition must be a bool type.");
+            walkStatementBlock(root.Params[1]);
+        }
+
+        void walkExpressionIndexer(ASTNode root) {
 
         }
 

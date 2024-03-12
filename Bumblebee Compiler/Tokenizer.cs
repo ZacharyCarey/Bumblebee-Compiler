@@ -13,9 +13,11 @@ namespace Bumblebee_Compiler {
         //static Regex LETTERS = new Regex(@"[a-zA-Z]", options);
         static Regex WHITESPACE = new Regex(@"\s+", options);
         static Regex NUMBERS = new Regex(@"\d+", options);
+        static Regex BOOL_LITERAL = new Regex(@"true", options);
         static Regex COMMENT = new Regex(@"\/\/(.*)[\r\n]*$", options);
         static Regex IDENTIFIER = new Regex(@"[_a-zA-Z]\w*", options);
-        static Regex OPERATOR = new Regex(@"[+\-*\/=!%]|and|or|xor|>>|<<|>|<", options);
+        static Regex OPERATOR = new Regex(@"and|or|xor|not|>>|<<|<=|>=|>|<|==|[+\-*\/=%&|^~]", options);
+        static Regex ITERATION = new Regex(@"while", options);
 
         internal Tokenizer() {
         }
@@ -121,9 +123,9 @@ namespace Bumblebee_Compiler {
                     continue;
                 }
 
-                match = IDENTIFIER.Match(input, current);
+                match = ITERATION.Match(input, current);
                 if (match.Success && match.Index == current) {
-                    yield return new Token(TokenType.Identifier, match.Value);
+                    yield return new Token(TokenType.Iteration, match.Value);
                     current += match.Length;
                     continue;
                 }
@@ -137,7 +139,14 @@ namespace Bumblebee_Compiler {
 
                 match = NUMBERS.Match(input, current);
                 if (match.Success && match.Index == current) {
-                    yield return new Token(TokenType.Number, match.Value);
+                    yield return new Token(TokenType.NumberLiteral, match.Value);
+                    current += match.Length;
+                    continue;
+                }
+
+                match = BOOL_LITERAL.Match(input, current);
+                if (match.Success && match.Index == current) {
+                    yield return new Token(TokenType.BoolLiteral, match.Value);
                     current += match.Length;
                     continue;
                 }
@@ -145,6 +154,13 @@ namespace Bumblebee_Compiler {
                 match = OPERATOR.Match(input, current);
                 if (match.Success && match.Index == current) {
                     yield return new Token(TokenType.Operator, match.Value);
+                    current += match.Length;
+                    continue;
+                }
+
+                match = IDENTIFIER.Match(input, current);
+                if (match.Success && match.Index == current) {
+                    yield return new Token(TokenType.Identifier, match.Value);
                     current += match.Length;
                     continue;
                 }

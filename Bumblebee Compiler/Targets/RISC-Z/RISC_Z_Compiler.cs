@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
 using System.Xml.Linq;
@@ -23,11 +24,12 @@ namespace Bumblebee_Compiler.Targets.RISC_Z {
         bool[] registersUsed = null;
         Dictionary<string, int> registers = null;
         TargetRegister targetRegister = new();
+        uint nextLabel = 0;
 
         public void Compile(ASTNode program, StreamWriter outputFile) {
             writer = outputFile;
             registersUsed = new bool[20];
-            registers = null;
+            registers = new();
             List<ASM> instructions = Compile(program).ToList();
             foreach(var instruction in instructions) {
                 outputFile.WriteLine(instruction.ToString());
@@ -58,7 +60,8 @@ namespace Bumblebee_Compiler.Targets.RISC_Z {
             mul = 0b1000,
             div = 0b1001,
             mod = 0b1010,
-            load = 0b11111
+            load = 0b11111,
+            jmp = 0b10000
         }
 
         struct ASM {
@@ -70,11 +73,13 @@ namespace Bumblebee_Compiler.Targets.RISC_Z {
             public string Arg1;
             public string Arg2;
             public string Comment = null;
+            public string Label = null;
 
             public ASM() { }
 
             public override string ToString() {
                 if (Comment != null) return "# " + Comment;
+                if (Label != null) return "label " + Label;
 
                 string asm = Op.ToString();
                 string arg0 = Arg0;
@@ -94,13 +99,32 @@ namespace Bumblebee_Compiler.Targets.RISC_Z {
                     arg2 = Arg2;
                 }
 
-                asm += " " + arg0;
-                asm += " " + arg1;
-                if (Op != OpCode.load && Op != OpCode.not) {
-                    asm += " " + arg2;
+                switch (Op) {
+                    case OpCode.add:
+                    case OpCode.sub:
+                    case OpCode.and:
+                    case OpCode.or:
+                    case OpCode.xor:
+                    case OpCode.lsh:
+                    case OpCode.rsh:
+                    case OpCode.mul:
+                    case OpCode.div:
+                    case OpCode.mod:
+                        asm += " " + arg0;
+                        asm += " " + arg1;
+                        asm += " " + arg2;
+                        return asm;
+                    case OpCode.not:
+                    case OpCode.load:
+                        asm += " " + arg0;
+                        asm += " " + arg1;
+                        return asm;
+                    case OpCode.jmp:
+                        asm += " " + arg0;
+                        return asm;
+                    default:
+                        throw new Exception("Unknown opcode.");
                 }
-
-                return asm;
             }
         }
 
@@ -140,7 +164,7 @@ namespace Bumblebee_Compiler.Targets.RISC_Z {
                 case ASTType.DeclarationStatement: return CompileDeclarationStatement(root);
                 case ASTType.ExpressionAssignmentStatement: return CompileExpressionAssignmentStatement(root);
                 case ASTType.ExpressionOperator: return CompileExpressionOperator(root);
-                case ASTType.ExpressionNumber:
+                case ASTType.NumberLiteral:
                     ASM num = new();
                     num.Op = OpCode.load;
                     num.Arg0 = root.Value;
@@ -158,6 +182,7 @@ namespace Bumblebee_Compiler.Targets.RISC_Z {
                     ASM comment = new();
                     comment.Comment = root.Value;
                     return Enumerable.Repeat(comment, 1);
+                case ASTType.IterationStatement: return CompileIterationStatement(root);
                 //ExpressionIndexer,
                 default:
                     throw new Exception("Unknown operation.");
@@ -196,13 +221,30 @@ namespace Bumblebee_Compiler.Targets.RISC_Z {
                 case "-": instruction.Op = OpCode.sub; break;
                 case "*": instruction.Op = OpCode.mul; break;
                 case "/": instruction.Op = OpCode.div; break;
-                case "and": instruction.Op = OpCode.and; break;
-                case "or": instruction.Op = OpCode.or; break;
-                case "xor": instruction.Op = OpCode.xor; break;
-                case "!": instruction.Op = OpCode.not; break;
+                case "and":
+                case "&":
+                    instruction.Op = OpCode.and; 
+                    break;
+                case "or":
+                case "|":
+                    instruction.Op = OpCode.or; 
+                    break;
+                case "xor":
+                case "^":
+                    instruction.Op = OpCode.xor; 
+                    break;
+                case "not":
+                case "~": 
+                    instruction.Op = OpCode.not; 
+                    break;
                 case "%": instruction.Op = OpCode.mod; break;
                 case ">>": instruction.Op = OpCode.rsh; break;
                 case "<<": instruction.Op = OpCode.lsh; break;
+                //case ">":
+                //case "<":
+                //case "<=":
+                //case ">=":
+                //case "==":
                 default: throw new Exception("Invalid operation");
             }
 
@@ -210,7 +252,7 @@ namespace Bumblebee_Compiler.Targets.RISC_Z {
             List<int> borrowedRegisters = new();
 
             // Get first arg
-            if (root.Params[0].Type == ASTType.ExpressionNumber) {
+            if (root.Params[0].Type == ASTType.NumberLiteral) {
                 instruction.Arg0 = root.Params[0].Value;
             } else if (root.Params[0].Type == ASTType.ExpressionIdentifier) {
                 instruction.Arg0 = GetTargetRegisterName(new (root.Params[0].Value));
@@ -228,7 +270,7 @@ namespace Bumblebee_Compiler.Targets.RISC_Z {
 
             // Get second arg, if applicable
             if (instruction.Op != OpCode.not) {
-                if (root.Params[1].Type == ASTType.ExpressionNumber) {
+                if (root.Params[1].Type == ASTType.NumberLiteral) {
                     instruction.Arg1 = root.Params[1].Value;
                 } else if (root.Params[1].Type == ASTType.ExpressionIdentifier) {
                     instruction.Arg1 = GetTargetRegisterName(new(root.Params[1].Value));
@@ -254,6 +296,33 @@ namespace Bumblebee_Compiler.Targets.RISC_Z {
             }
 
             yield return instruction;
+        }
+
+        private IEnumerable<ASM> CompileIterationStatement(ASTNode root) {
+            if (root.Value != "while") throw new Exception("Invalid iteration type.");
+
+            if (root.Params[0].Type != ASTType.BoolLiteral) throw new Exception("Unsupported condition type");
+
+            if (root.Params[0].Value == "false") {
+                // never runs, dont add any instructions from the statement block
+                yield break;
+            }
+
+            if (root.Params[0].Value != "true") throw new Exception("Invalid bool type.");
+
+            ASM label = new();
+            label.Label = $"Label{nextLabel}";
+            nextLabel++;
+            yield return label;
+
+            foreach(var instruction in CompileStatementBlock(root.Params[1])) {
+                yield return instruction;
+            }
+
+            ASM jump = new();
+            jump.Op = OpCode.jmp;
+            jump.Arg0 = label.Label;
+            yield return jump;
         }
     }
 }

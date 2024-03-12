@@ -45,13 +45,18 @@ namespace Bumblebee_Compiler {
      *      
      *      
      *  ExpressionOperator
-     *  Value = "+" or "-" or "*" or "/" or "and" or "or" or "xor" or "!" or "%" or ">>" or "<<"
+     *  Value = "+", "-", "*", "/", "%", ">>", "<<"
+     *          "and", "or", "xor", "not", 
+     *          "&", "|", "^", "~" 
      *  params[0] = ExpressionOperator or ExpressionNumber or ExpressionIdentifier or ExpressionIndexer: argument 1
      *  params[1] (Optional based on operator) = ExpressionOperator or ExpressionNumber or ExpressionIdentifier or ExpressionIndexer: argument 2
      *  
      *  
-     *  ExpressionNumber
+     *  NumberLiteral
      *  Value = number literal
+     *  
+     *  BoolLiteral
+     *  Value = "true" or "false"
      *  
      *  
      *  ExpressionIdentifier
@@ -66,6 +71,13 @@ namespace Bumblebee_Compiler {
      *  StatementBlock
      *  Value = null
      *  params[n] = DeclarationStatement or ExpressionAssignmentStatement or ExpressionStatement or StatementBlock
+     *  
+     *  
+     *  
+     *  IterationStatement
+     *  Value = "while"
+     *  params[0] = Condition: BoolLiteral, ExpressionOperator, ExpressionIdentifier, ExpressionIndexer
+     *  params[1] = Code block: StatementBlock
      */
     public class ASTNode {
         public ASTType Type;
@@ -89,16 +101,17 @@ namespace Bumblebee_Compiler {
         StatementBlock,
         DeclarationStatement,
         ExpressionAssignmentStatement,
-        //ExpressionStatement,
+        IterationStatement,
 
         ExpressionOperator,
-        ExpressionNumber,
+        NumberLiteral,
+        BoolLiteral,
         ExpressionIdentifier,
         ExpressionIndexer,
         Comment,
 /*
         SelectionStatement,
-        IterationStatement,
+        
         JumpStatement*/
     }
 
@@ -119,9 +132,21 @@ namespace Bumblebee_Compiler {
             }
         }
 
+        private bool IsValidType(string name) {
+            // TODO instead of looking for type for declaration,
+            // should look for two identifiers followed by an "=" then assume first is type and 2nd is name.
+            switch(name) {
+                case "uint8":
+                case "bool":
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
         private ASTNode walkStatement(List<Token> tokens) {
             Token token = tokens[current];
-            if (token.Type == TokenType.Identifier && token.Value == "uint8") {
+            if (token.Type == TokenType.Identifier && IsValidType(token.Value)) {
                 return walkDeclarationStatement(tokens);
             }
             if (token.Type == TokenType.Paren && token.Value == "{") {
@@ -131,6 +156,9 @@ namespace Bumblebee_Compiler {
                 ASTNode comment = new ASTNode(ASTType.Comment, token.Value);
                 current++;
                 return comment;
+            }
+            if (token.Type == TokenType.Iteration) {
+                return walkIteration(tokens);
             }
 
             // Attempt to search for expression, or expression statement
@@ -146,6 +174,23 @@ namespace Bumblebee_Compiler {
             throw new Exception("Invalid statement.");
         }
 
+        private ASTNode walkIteration(List<Token> tokens) {
+            Token token = tokens[current];
+            if (token.Type != TokenType.Iteration) throw new Exception("Expected iteration.");
+
+            ASTNode node = new ASTNode(ASTType.IterationStatement, token.Value);
+            if (token.Value == "while") {
+                token = tokens[++current];
+                if (token.Type != TokenType.Paren || token.Value != "(") throw new Exception("Expected loop condition");
+                node.Params.Add(walkExpression(tokens, true));
+                token = tokens[current];
+                node.Params.Add(walkStatementBlock(tokens));
+                return node;
+            }
+
+            throw new Exception("Invalid iteration.");
+        }
+
         private ASTNode walkStatementBlock(List<Token> tokens) {
             Token token = tokens[current];
             if (token.Type != TokenType.Paren || token.Value != "{") throw new Exception("Invalid statement block. {");
@@ -155,8 +200,8 @@ namespace Bumblebee_Compiler {
                 if (token.Type == TokenType.Paren && token.Value == "}") {
                     break;
                 }
-                AST.Params.Add(walkStatement(tokens));
-                token = tokens[++current];
+                statementBlock.Params.Add(walkStatement(tokens));
+                token = tokens[current];
             }
 
             if (token.Type != TokenType.Paren || token.Value != "}") throw new Exception("Expected statement block closing bracket. }");
@@ -222,21 +267,27 @@ namespace Bumblebee_Compiler {
             return statement;
         }
 
-        private ASTNode walkExpression(List<Token> tokens) {
+        private ASTNode walkExpression(List<Token> tokens, bool single = false) {
             Token token = tokens[current];
 
             // TODO check for function call
 
             ASTNode left;
             // Get first argument
-            if (token.Type == TokenType.Paren && token.Value == "(") {
+            if (token.Type == TokenType.Operator && (token.Value == "not" || token.Value == "~")) {
+                left = walkOperator(tokens, null);
+                token = tokens[current];
+            } else if (token.Type == TokenType.Paren && token.Value == "(") {
                 current++;
-                left = walkExpressionStatement(tokens);
+                left = walkExpression(tokens);
                 token = tokens[current];
                 if (token.Type != TokenType.Paren || token.Value != ")") throw new Exception("Expected closing parenth. )");
                 token = tokens[++current];
-            } else if (token.Type == TokenType.Number) {
-                left = new ASTNode(ASTType.ExpressionNumber, token.Value);
+            } else if (token.Type == TokenType.NumberLiteral) {
+                left = new ASTNode(ASTType.NumberLiteral, token.Value);
+                token = tokens[++current];
+            } else if (token.Type == TokenType.BoolLiteral) {
+                left = new ASTNode(ASTType.BoolLiteral, token.Value);
                 token = tokens[++current];
             } else if (token.Type == TokenType.Identifier) {
                 // TODO check for function
@@ -248,7 +299,7 @@ namespace Bumblebee_Compiler {
             }
 
             // Check for either operator or delimiter
-            if (token.Type == TokenType.LineDelimiter || (token.Type == TokenType.Paren && token.Value == ")")) {
+            if (single || token.Type == TokenType.LineDelimiter || (token.Type == TokenType.Paren && token.Value == ")")) {
                 return left;
             }
 
@@ -261,9 +312,14 @@ namespace Bumblebee_Compiler {
 
             if (token.Type != TokenType.Operator) throw new Exception("Operator expected, invalid expression.");
             ASTNode op = new ASTNode(ASTType.ExpressionOperator, token.Value);
-            op.Params.Add(left);
-            current++;
-            op.Params.Add(walkExpression(tokens));
+            if (token.Value == "not" || token.Value == "~") {
+                // Left is null, we need to get the arg
+                op.Params.Add(walkExpression(tokens, true));
+            } else {
+                op.Params.Add(left);
+                current++;
+                op.Params.Add(walkExpression(tokens));
+            }
             // TODO order of operations? Just check if left or right is also an operator, and restructure tree as needed?
             return op;
         }

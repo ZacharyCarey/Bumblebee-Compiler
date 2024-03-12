@@ -7,9 +7,9 @@ using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 
 
-string text = File.ReadAllText("TestPrograms/TuringCompleteAiShowdown.bee");
+string text = File.ReadAllText("TestPrograms/TuringCompleteDancingMachine.bee");
 ICompiler compiler = new RISC_Z_Compiler();
-const string outputFile = "TuringCompleteAiShowdown.asm";
+const string outputFile = "TuringCompleteDancingMachine.asm";
 
 
 // Read the text file into an array of objects with basic types
