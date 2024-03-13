@@ -1,4 +1,6 @@
-﻿using System;
+﻿using Microsoft.Win32;
+using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection.Emit;
@@ -6,8 +8,99 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
 using System.Xml.Linq;
+using static Bumblebee_Compiler.Targets.RISC_Z.RISC_Z_Registers;
 
 namespace Bumblebee_Compiler.Targets.RISC_Z {
+    internal class RISC_Z_Registers {
+        internal struct TargetRegister {
+            public int number = -1;
+            public string name = null;
+            public bool IsNewRegister = false;
+            public TargetRegister(int reg, bool newRegister) {
+                this.number = reg;
+                this.IsNewRegister = newRegister;
+            }
+            public TargetRegister(string name) {
+                this.name = name;
+            }
+            public TargetRegister() { }
+
+            public override string ToString() {
+                if (number >= 0 && name != null) throw new Exception("Invalid register state.");
+                if (number >= 0) {
+                    return "reg" + number;
+                }  else {
+                    return name;
+                }
+            }
+        }
+
+        bool[] registersUsed = new bool[20];
+        Dictionary<string, int> registers = new();
+        TargetRegister targetRegister = new();
+        uint nextLabel = 0;
+
+        public TargetRegister CreateRegister() {
+            for (int i = 0; i < registersUsed.Length; i++) {
+                if (registersUsed[i] == false) {
+                    registersUsed[i] = true;
+                    return new TargetRegister(i, true);
+                }
+            }
+            throw new Exception("No remaining registers available.");
+        }
+
+        public TargetRegister CreateRegister(string varName) {
+            switch (varName) {
+                case "input":
+                case "output":
+                case "HI":
+                case "counter":
+                case "stack":
+                    throw new Exception("Can not create register for known-register");
+            }
+
+            if (registers.ContainsKey(varName)) throw new Exception("Variable already exists");
+
+            TargetRegister newReg = CreateRegister();
+            registers[varName] = newReg.number;
+            return newReg;
+        }
+
+        public TargetRegister GetRegister(string varName) {
+            switch (varName) {
+                case "input":
+                case "output":
+                case "HI":
+                case "counter":
+                case "stack":
+                    return new TargetRegister(varName);
+            }
+
+            int register = registers[varName];
+            return new TargetRegister(register, false);
+        }
+
+        public void RemoveRegister(TargetRegister register) {
+            if (register.number < 0) throw new Exception("Not a returnable register");
+            registersUsed[register.number] = false;
+        }
+
+        public void RemoveRegister(string varName) {
+            int reg = registers[varName];
+            registers.Remove(varName);
+            registersUsed[reg] = false;
+        }
+
+        public string GetLabelName() {
+            string name = $"Label{nextLabel}";
+            checked {
+                nextLabel++;
+            }
+            return name;
+        }
+    }
+
     internal class RISC_Z_Compiler : ICompiler {
         public Dictionary<string, VariableOptions> KnownVariables => new(){
             {"input", new() {IsReadable = true, IsWritable = false, TypeName = "uint8"} },
@@ -22,31 +115,14 @@ namespace Bumblebee_Compiler.Targets.RISC_Z {
         };
 
         StreamWriter writer = null;
-        bool[] registersUsed = null;
-        Dictionary<string, int> registers = null;
-        TargetRegister targetRegister = new();
-        uint nextLabel = 0;
+        RISC_Z_Registers registers = null;
 
         public void Compile(ASTNode program, StreamWriter outputFile) {
             writer = outputFile;
-            registersUsed = new bool[20];
             registers = new();
-            List<ASM> instructions = Compile(program).ToList();
-            foreach(var instruction in instructions) {
+            foreach(var instruction in CompileStatementBlock(program)) {
                 outputFile.WriteLine(instruction.ToString());
             }
-        }
-
-        struct TargetRegister {
-            public int number = -1;
-            public string name = null;
-            public TargetRegister(int reg) {
-                this.number = reg;
-            }
-            public TargetRegister(string name) {
-                this.name = name;
-            }
-            public TargetRegister() { }
         }
 
         internal enum OpCode {
@@ -71,7 +147,7 @@ namespace Bumblebee_Compiler.Targets.RISC_Z {
             jmp_lte = 0b10110
         }
 
-        struct ASM {
+        struct ASM : IEnumerable<ASM> {
             /*public bool LoadArg0 = false;
             public bool LoadArg1 = false;
             public bool LoadArg2 = false;*/
@@ -139,137 +215,129 @@ namespace Bumblebee_Compiler.Targets.RISC_Z {
                         throw new Exception("Unknown opcode.");
                 }
             }
-        }
 
-        private int GetUnusedRegister() {
-            for (int i = 0; i < registersUsed.Length; i++) {
-                if (registersUsed[i] == false) {
-                    registersUsed[i] = true;
-                    return i;
+            private class ASMIterator : IEnumerator<ASM> {
+                private ASM value;
+                bool init = true;
+                public ASM Current => value;
+                object IEnumerator.Current => value;
+
+                public ASMIterator(ASM value) {
+                    this.value = value;
+                }
+
+                public void Dispose() { }
+
+                public bool MoveNext() {
+                    if (init) {
+                        init = false;
+                        return true;
+                    } else {
+                        return false;
+                    }
+                }
+
+                public void Reset() {
+                    init = true;
                 }
             }
-            throw new Exception("No remaining registers available.");
+
+            public IEnumerator<ASM> GetEnumerator() {
+                return new ASMIterator(this);
+            }
+            IEnumerator IEnumerable.GetEnumerator() {
+                return new ASMIterator(this);
+            }
         }
 
-        private string GetTargetRegisterName(TargetRegister register) {
-            // TODO move into TargetRegister struct
-            if (register.number >= 0) {
-                return "reg" + register.number;
-            } else if (register.name != null) {
-                switch(register.name) {
-                    case "input":
-                    case "output":
-                    case "HI":
-                    case "counter":
-                    case "stack":
-                        return register.name;
-                    default:
-                        return "reg" + registers[register.name];
-                }
+        private IEnumerable<ASM> CompileComment(ASTNode node) {
+            if (node.Type != ASTType.Comment) throw new Exception("Expected comment.");
+            ASM asm = new ASM();
+            asm.Comment = node.Value;
+            yield return asm;
+        } 
+
+        private void CompileNumberLiteral(ASTNode node, out TargetRegister target) {
+            if (node.Type != ASTType.NumberLiteral) throw new Exception("Expected number literal.");
+            target = new TargetRegister(node.Value);
+        }
+        
+        private void CompileBoolLiteral(ASTNode node, out TargetRegister target) {
+            if (node.Type != ASTType.BoolLiteral) throw new Exception("Expected bool literal.");
+            if (node.Value == "true") {
+                target = new TargetRegister("1");
+            } else if (node.Value == "false") {
+                target = new TargetRegister("0");
             } else {
-                throw new Exception("Register Null");
+                throw new Exception("Invalid bool value.");
             }
         }
 
-        private string GetLabelName() {
-            string name = $"Label{nextLabel}";
-            checked {
-                nextLabel++;
-            }
-            return name;
-        }
-
-        private IEnumerable<ASM> Compile(ASTNode root) {
-            switch(root.Type) {
-                case ASTType.StatementBlock: return CompileStatementBlock(root);
-                case ASTType.DeclarationStatement: return CompileDeclarationStatement(root);
-                case ASTType.ExpressionAssignmentStatement: return CompileExpressionAssignmentStatement(root);
-                case ASTType.ExpressionOperator: return CompileExpressionOperator(root);
-                case ASTType.NumberLiteral:
-                    ASM num = new();
-                    num.Op = OpCode.load;
-                    num.Arg0 = root.Value;
-                    num.Arg1 = GetTargetRegisterName(targetRegister);
-                    targetRegister = new();
-                    return Enumerable.Repeat(num, 1);
-                case ASTType.BoolLiteral:
-                    if (root.Value != "false" && root.Value != "true") throw new Exception("Invalid bool");
-                    ASM boolean = new();
-                    boolean.Op = OpCode.load;
-                    boolean.Arg0 = (root.Value == "true") ? "1" : "0"; //0 or 1
-                    boolean.Arg1 = GetTargetRegisterName(targetRegister);
-                    targetRegister = new();
-                    return Enumerable.Repeat(boolean, 1);
-                case ASTType.ExpressionIdentifier:
-                    ASM ident = new();
-                    ident.Op = OpCode.load;
-                    ident.Arg0 = GetTargetRegisterName(new TargetRegister(root.Value));
-                    ident.Arg1 = GetTargetRegisterName(targetRegister);
-                    targetRegister = new();
-                    return Enumerable.Repeat(ident, 1);
-                case ASTType.Comment:
-                    ASM comment = new();
-                    comment.Comment = root.Value;
-                    return Enumerable.Repeat(comment, 1);
-                case ASTType.IterationStatement: return CompileIterationStatement(root);
-                case ASTType.SelectionStatement: return CompileSelectionStatement(root);
-                //ExpressionIndexer,
-                default:
-                    throw new Exception("Unknown operation.");
-            }
-        }
-
-        private IEnumerable<ASM> CompileStatementBlock(ASTNode root) {
-            foreach(var node in root.Params) {
-                foreach(ASM asm in Compile(node)) {
-                    yield return asm;
-                }
-            }
-        }
-
-        private IEnumerable<ASM> CompileDeclarationStatement(ASTNode root) {
-            string name = root.Params[0].Value;
-            registers[name] = GetUnusedRegister();
-
-            if (root.Params.Count > 1) {
-                return Compile(root.Params[1]);
-            } else {
+        /// <summary>
+        /// If target is provided (not null), then the resulting operation will be stores in that register
+        /// IF POSSIBLE and set the target to null. Some operation, like a NumberLiteral, 
+        /// does not do an operation. In these cases, target will be set to the register that
+        /// should be used.
+        /// 
+        /// In short, after calling if target==null then the value is already stored in the given target.
+        /// if target!=null, then that register should be used as the argument.
+        /// 
+        /// See "CompileExpressionAssignmentStatement" as a simple example
+        /// </summary>
+        private IEnumerable<ASM> CompileExpression(ASTNode node, ref TargetRegister? target) {
+            TargetRegister result;
+            if (node.Type == ASTType.NumberLiteral) {
+                CompileNumberLiteral(node, out result);
+                target = result;
                 return Enumerable.Empty<ASM>();
+            } else if (node.Type == ASTType.BoolLiteral) {
+                CompileBoolLiteral(node, out result);
+                target = result;
+                return Enumerable.Empty<ASM>();
+            } else if (node.Type == ASTType.ExpressionIdentifier) {
+                target = registers.GetRegister(node.Value);
+                return Enumerable.Empty<ASM>();
+            } else if (node.Type == ASTType.ExpressionOperator) {
+                return CompileExpressionOperator(node, ref target);
+            } else if (node.Type == ASTType.ExpressionIndexer) {
+                throw new Exception();
+            } else {
+                throw new Exception("Invalid argument.");
             }
         }
 
-        private IEnumerable<ASM> CompileExpressionAssignmentStatement(ASTNode root) {
-            string name = root.Params[0].Value;
-            targetRegister = new(name);
-            return Compile(root.Params[1]); // Value should be saved to target register
-        }
+        /// <summary>
+        /// See "CompileExpression" on how argument "target" should be handled.
+        /// </summary>
+        private IEnumerable<ASM> CompileExpressionOperator(ASTNode node, ref TargetRegister? target) {
+            if (node.Type != ASTType.ExpressionOperator) throw new Exception("Expected operator.");
 
-        private IEnumerable<ASM> CompileExpressionOperator(ASTNode root) {
-            ASM instruction = new();
-            switch (root.Value) {
-                case "+": instruction.Op = OpCode.add; break;
-                case "-": instruction.Op = OpCode.sub; break;
-                case "*": instruction.Op = OpCode.mul; break;
-                case "/": instruction.Op = OpCode.div; break;
+            ASM asm = new();
+            IEnumerable<ASM> instructions = Enumerable.Empty<ASM>();
+            switch (node.Value) {
+                case "+": asm.Op = OpCode.add; break;
+                case "-": asm.Op = OpCode.sub; break;
+                case "*": asm.Op = OpCode.mul; break;
+                case "/": asm.Op = OpCode.div; break;
                 case "and":
                 case "&":
-                    instruction.Op = OpCode.and; 
+                    asm.Op = OpCode.and;
                     break;
                 case "or":
                 case "|":
-                    instruction.Op = OpCode.or; 
+                    asm.Op = OpCode.or;
                     break;
                 case "xor":
                 case "^":
-                    instruction.Op = OpCode.xor; 
+                    asm.Op = OpCode.xor;
                     break;
                 case "not":
-                case "~": 
-                    instruction.Op = OpCode.not; 
+                case "~":
+                    asm.Op = OpCode.not;
                     break;
-                case "%": instruction.Op = OpCode.mod; break;
-                case ">>": instruction.Op = OpCode.rsh; break;
-                case "<<": instruction.Op = OpCode.lsh; break;
+                case "%": asm.Op = OpCode.mod; break;
+                case ">>": asm.Op = OpCode.rsh; break;
+                case "<<": asm.Op = OpCode.lsh; break;
                 //case ">":
                 //case "<":
                 //case "<=":
@@ -278,153 +346,219 @@ namespace Bumblebee_Compiler.Targets.RISC_Z {
                 default: throw new Exception("Invalid operation");
             }
 
-            TargetRegister target = targetRegister;
-            List<int> borrowedRegisters = new();
+            List<TargetRegister> usedRegisters = new();
 
             // Get first arg
-            if (root.Params[0].Type == ASTType.NumberLiteral) {
-                instruction.Arg0 = root.Params[0].Value;
-            } else if (root.Params[0].Type == ASTType.ExpressionIdentifier) {
-                instruction.Arg0 = GetTargetRegisterName(new (root.Params[0].Value));
-            } else if (root.Params[0].Type == ASTType.ExpressionOperator) {
-                int register = GetUnusedRegister();
-                borrowedRegisters.Add(register);
-                targetRegister = new(register);
-                instruction.Arg0 = GetTargetRegisterName(targetRegister);
-                foreach(var asm in Compile(root.Params[0])) {
-                    yield return asm;
-                }
-            } else {
-                throw new Exception("Invalid argument.");
+            TargetRegister? arg0 = null;
+            instructions = instructions.Concat(CompileExpression(node.Params[0], ref arg0));
+            if (arg0 == null) throw new Exception("Expected a return register");
+            if (((TargetRegister)arg0).IsNewRegister) {
+                usedRegisters.Add((TargetRegister)arg0);
             }
+            asm.Arg0 = arg0.ToString();
 
             // Get second arg, if applicable
-            if (instruction.Op != OpCode.not) {
-                if (root.Params[1].Type == ASTType.NumberLiteral) {
-                    instruction.Arg1 = root.Params[1].Value;
-                } else if (root.Params[1].Type == ASTType.ExpressionIdentifier) {
-                    instruction.Arg1 = GetTargetRegisterName(new(root.Params[1].Value));
-                } else if (root.Params[1].Type == ASTType.ExpressionOperator) {
-                    int register = GetUnusedRegister();
-                    borrowedRegisters.Add(register);
-                    targetRegister = new(register);
-                    instruction.Arg1 = GetTargetRegisterName(targetRegister);
-                    foreach (var asm in Compile(root.Params[1])) {
-                        yield return asm;
-                    }
+            ref string destinationArg = ref asm.Arg2;
+            if (asm.Op != OpCode.not) {
+                TargetRegister? arg1 = null;
+                instructions = instructions.Concat(CompileExpression(node.Params[1], ref arg1));
+                if (arg1 == null) throw new Exception("Expected a return register");
+                if (((TargetRegister)arg1).IsNewRegister) {
+                    usedRegisters.Add((TargetRegister)arg1);
+                }
+                asm.Arg1 = arg1.ToString();
+
+                destinationArg = ref asm.Arg2;
+            } else {
+                destinationArg = ref asm.Arg1;
+            }
+            // TODO order of operations?
+            foreach (TargetRegister register in usedRegisters) {
+                registers.RemoveRegister(register);
+            }
+
+            if (target == null) {
+                // Return the newly created register we are saving to
+                target = registers.CreateRegister();
+                destinationArg = target.ToString();
+            } else {
+                // return null to signify we did save to the given register
+                destinationArg = target.ToString();
+                target = null;
+            }
+
+            instructions = instructions.Concat(asm);
+            return instructions;
+        }
+
+        private IEnumerable<ASM> CompileStatementBlock(ASTNode node) {
+            if (node.Type != ASTType.StatementBlock) throw new Exception("Expected block statement.");
+
+            foreach(ASTNode statement in node.Params) {
+                IEnumerable<ASM> instructions;
+                if (statement.Type == ASTType.DeclarationStatement) {
+                    instructions = CompileDeclarationStatement(statement);
+                } else if (statement.Type == ASTType.ExpressionAssignmentStatement) {
+                    instructions = CompileExpressionAssignmentStatement(statement);
+                } else if (statement.Type == ASTType.StatementBlock) {
+                    instructions = CompileStatementBlock(statement);
+                } else if (statement.Type == ASTType.IterationStatement) {
+                    instructions = CompileIterationStatement(statement);
+                } else if (statement.Type == ASTType.SelectionStatement) {
+                    instructions = CompileSelectionStatement(statement);
+                } else if (statement.Type == ASTType.Comment) {
+                    instructions = CompileComment(statement);
                 } else {
-                    throw new Exception("Invalid argument.");
+                    throw new Exception("Invalid statement type.");
                 }
 
-                instruction.Arg2 = GetTargetRegisterName(target);
+                foreach(ASM asm in instructions) {
+                    yield return asm;
+                }
+            }
+        }
+
+        private IEnumerable<ASM> CompileExpressionAssignmentStatement(ASTNode node) {
+            if (node.Type != ASTType.ExpressionAssignmentStatement) throw new Exception("Expected ExpressionAssignmentStatement.");
+
+            string name = node.Params[0].Value;
+            TargetRegister dest = registers.GetRegister(name);
+            TargetRegister? target = dest;
+            IEnumerable<ASM> instructions = CompileExpression(node.Params[1], ref target); // Value should be saved to target register
+            if (target != null) {
+                // Result was not saved to the target, so we need to do a load operation
+                ASM load = new ASM();
+                load.Op = OpCode.load;
+                load.Arg0 = target.ToString();
+                load.Arg1 = dest.ToString();
+                instructions = instructions.Concat(load);
+            }
+            return instructions;
+        }
+
+        // TODO somewhere needs to check for using uninitialized variable
+        private IEnumerable<ASM> CompileDeclarationStatement(ASTNode node) {
+            if (node.Type != ASTType.DeclarationStatement) throw new Exception("Expected DeclarationStatement.");
+
+            if (node.Params[0].Type != ASTType.ExpressionIdentifier) throw new Exception("Expected identifier.");
+            string name = node.Params[0].Value;
+            TargetRegister register = registers.CreateRegister(name);
+
+            if (node.Params.Count > 1) {
+                return CompileExpressionAssignmentStatement(node.Params[1]);
             } else {
-                instruction.Arg1 = GetTargetRegisterName(target);
+                return Enumerable.Empty<ASM>();
             }
-
-            foreach(int register in borrowedRegisters) {
-                registersUsed[register] = false;
-            }
-
-            yield return instruction;
         }
 
-        private IEnumerable<ASM> CompileIterationStatement(ASTNode root) {
-            if (root.Type != ASTType.IterationStatement || root.Value != "while") throw new Exception("Invalid iteration type.");
-
-            // TODO see SelectionStatement to support other types
-            if (root.Params[0].Type != ASTType.BoolLiteral) throw new Exception("Unsupported condition type");
-
-            if (root.Params[0].Value == "false") {
-                // never runs, dont add any instructions from the statement block
-                yield break;
+        private IEnumerable<ASM> CompileIterationStatement(ASTNode node) {
+            if (node.Type != ASTType.IterationStatement) throw new Exception("Expected iteration type.");
+            if (node.Value != "while") {
+                throw new Exception("Unknown iteration type");
             }
 
-            if (root.Params[0].Value != "true") throw new Exception("Invalid bool type.");
+            string else_label;
+            bool always_true;
+            bool always_false;
+            IEnumerable<ASM> instructions = GetJumpStatementFromCondition(node.Params[0], out else_label, out always_true, out always_false);
 
-            ASM label = new();
-            label.Label = GetLabelName();
-            yield return label;
+            if (always_true) {
+                // Since the statement is always true, always run block A with a single jump
+                ASM loop_label = new();
+                loop_label.Label = registers.GetLabelName();
+                instructions = loop_label;
 
-            foreach(var instruction in CompileStatementBlock(root.Params[1])) {
-                yield return instruction;
+                instructions = instructions.Concat(CompileStatementBlock(node.Params[1]));
+
+                ASM true_jmp = new();
+                true_jmp.Op = OpCode.jmp;
+                true_jmp.Arg0 = loop_label.Label;
+                return instructions.Concat(true_jmp);
+            } else if (always_false) {
+                // If statement always false, there is nothing to run
+                return Enumerable.Empty<ASM>();
             }
 
-            ASM jump = new();
-            jump.Op = OpCode.jmp;
-            jump.Arg0 = label.Label;
-            yield return jump;
+            ASM cond_label = new();
+            cond_label.Label = registers.GetLabelName();
+            instructions = cond_label.Concat(instructions);
+
+            instructions = instructions.Concat(CompileStatementBlock(node.Params[1]));
+
+            ASM jmp = new();
+            jmp.Op = OpCode.jmp;
+            jmp.Arg0 = cond_label.Label;
+            instructions = instructions.Concat(jmp);
+
+            ASM else_label_asm = new();
+            else_label_asm.Label = else_label;
+            instructions = instructions.Concat(else_label_asm);
+
+            return instructions;
         }
-        /*
-        private OpCode GetOppositeJmp(OpCode jmp) {
-            switch(jmp) {
-                case OpCode.jmp_eq: return OpCode.jmp_neq;
-                case OpCode.jmp_neq: return OpCode.jmp_eq;
-                case OpCode.jmp_gt: return OpCode.jmp_lte;
-                case OpCode.jmp_gte: return OpCode.jmp_lt;
-                case OpCode.jmp_lt: return OpCode.jmp_gte;
-                case OpCode.jmp_lte: return OpCode.jmp_gt;
-                default: throw new Exception("Invalid jump operation");
-            }
-        }*/ 
 
-        private IEnumerable<ASM> CompileSelectionStatement(ASTNode root) {
-            if (root.Type != ASTType.SelectionStatement || root.Value != "if") throw new Exception("Invalid selection type.");
-
-
-            if (root.Params[0].Type == ASTType.BoolLiteral) {
-                if (root.Params[0].Value == "true") {
-                    foreach (var instruct in CompileStatementBlock(root.Params[1])) {
-                        yield return instruct;
-                    }
-                    yield break;
-                } else if (root.Params[0].Value == "false") {
+        private IEnumerable<ASM> GetJumpStatementFromCondition(ASTNode node, out string else_label, out bool alwaysTrue, out bool alwaysFalse) {
+            if (node.Type == ASTType.BoolLiteral) {
+                string boolean = node.Value;
+                if (boolean == "true") {
+                    // Since the statement is always true, always run block A without adding any jumps
+                    alwaysTrue = true;
+                    alwaysFalse = false;
+                    else_label = null;
+                    return Enumerable.Empty<ASM>();
+                } else if (boolean == "false") {
                     // Only applies for "else" or "else if" conditions.
-                    if (root.Params.Count > 2) {
-                        if (root.Params[2].Type == ASTType.SelectionStatement) {
-                            foreach (var instruct in CompileSelectionStatement(root.Params[2])) {
-                                yield return instruct;
-                            }
-                        } else {
-                            foreach (var instruct in CompileStatementBlock(root.Params[2])) {
-                                yield return instruct;
-                            }
-                        }
-                    }
-                    yield break;
+                    // If statement always false, always run block B without adding any jumps
+                    alwaysTrue = false;
+                    alwaysFalse = true;
+                    else_label = null;
+                    return Enumerable.Empty<ASM>();
                 } else {
                     throw new Exception("Invalid bool");
                 }
-            }
-
-            // Must be a bool type
-            string exitLabelName = GetLabelName();
-
-            if (root.Params[0].Type == ASTType.ExpressionIdentifier) {
+            }else if (node.Type == ASTType.ExpressionIdentifier) {
+                alwaysTrue = false;
+                alwaysFalse = false;
+                else_label = registers.GetLabelName();
                 ASM jmp = new();
                 jmp.Op = OpCode.jmp_eq;
-                jmp.Arg0 = GetTargetRegisterName(new TargetRegister(root.Params[0].Value));
+                jmp.Arg0 = registers.GetRegister(node.Value).ToString();
                 jmp.Arg1 = "0";
-                jmp.Arg2 = exitLabelName;
-                yield return jmp;
-            } else if (root.Params[0].Type == ASTType.ExpressionOperator) {
+                jmp.Arg2 = else_label;
+                return jmp;
+            } else if (node.Type == ASTType.ExpressionOperator) {
                 // TODO in certain cases, the jmp statement can be simplified / done in less instructions
+                alwaysFalse = false;
+                alwaysTrue = false;
+                else_label = registers.GetLabelName();
                 ASM jmp = new();
-                jmp.Arg2 = exitLabelName;
+                jmp.Arg2 = else_label;
 
-                bool evaluateBool = false;
-                switch(root.Params[0].Value) {
+                switch (node.Value) {
                     case "and":
                     case "or":
                     case "xor":
-                        evaluateBool = true;
                         jmp.Op = OpCode.jmp_eq;
                         jmp.Arg1 = "0";
                         break;
                     case "not":
-                        evaluateBool = true;
-                        jmp.Op = OpCode.jmp_neq;
+                        ASTNode exp;
+                        if (node.Value == "not") {
+                            jmp.Op = OpCode.jmp_neq;
+                            exp = node.Params[0];
+                        } else {
+                            jmp.Op = OpCode.jmp_eq;
+                            exp = node;
+                        }
                         jmp.Arg1 = "0";
-                        break;
+                        TargetRegister? arg = null;
+                        IEnumerable<ASM> instruct = CompileExpression(exp, ref arg);
+                        if (arg == null) throw new Exception("Expected a return register");
+                        if (((TargetRegister)arg).IsNewRegister) {
+                            registers.RemoveRegister((TargetRegister)arg);
+                        }
+                        jmp.Arg0 = arg.ToString();
+                        return instruct.Concat(jmp);
                     case "<=": jmp.Op = OpCode.jmp_gt; break;
                     case ">=": jmp.Op = OpCode.jmp_lt; break;
                     case "<": jmp.Op = OpCode.jmp_gte; break;
@@ -435,119 +569,90 @@ namespace Bumblebee_Compiler.Targets.RISC_Z {
                         throw new Exception("Expected bool operator");
                 }
 
-                List<int> borrowedRegisters = new();
-                if (root.Params[0].Value == "not") {
-                    ASTNode shortcut = root.Params[0].Params[0];
-                    // arg1
-                    if (shortcut.Type == ASTType.NumberLiteral) { // TODO took this from CompileOperator. Create function?
-                        jmp.Arg0 = shortcut.Value;
-                    } else if (shortcut.Type == ASTType.ExpressionIdentifier) {
-                        jmp.Arg0 = GetTargetRegisterName(new(shortcut.Value));
-                    } else if (shortcut.Type == ASTType.ExpressionOperator) {
-                        int register = GetUnusedRegister();
-                        borrowedRegisters.Add(register);
-                        targetRegister = new(register);
-                        jmp.Arg0 = GetTargetRegisterName(targetRegister);
-                        foreach (var asm in Compile(shortcut)) {
-                            yield return asm;
-                        }
-                    } else {
-                        throw new Exception("Invalid argument.");
-                    }
-                } else if (evaluateBool) {
-                    // Evaluate arg1 into a register, then evaluate
-                    int argRegister = GetUnusedRegister();
-                    borrowedRegisters.Add(argRegister);
-                    targetRegister = new(argRegister);
-                    jmp.Arg0 = GetTargetRegisterName(targetRegister);
-                    foreach(var instruct in CompileExpressionOperator(root.Params[0])) {
-                        yield return instruct;
-                    }
-                } else {
-                    // Arg1
-                    ASTNode shortcut = root.Params[0].Params[0];
-                    if (shortcut.Type == ASTType.NumberLiteral) {
-                        jmp.Arg0 = root.Params[0].Value;
-                    } else if (shortcut.Type == ASTType.ExpressionIdentifier) {
-                        jmp.Arg0 = GetTargetRegisterName(new(shortcut.Value));
-                    } else if (shortcut.Type == ASTType.ExpressionOperator) {
-                        int register = GetUnusedRegister();
-                        borrowedRegisters.Add(register);
-                        targetRegister = new(register);
-                        jmp.Arg0 = GetTargetRegisterName(targetRegister);
-                        foreach (var asm in Compile(shortcut)) {
-                            yield return asm;
-                        }
-                    } else if (shortcut.Type == ASTType.BoolLiteral) {
-                        jmp.Arg0 = (shortcut.Value == "true") ? "1" : "0";
-                    } else {
-                        throw new Exception("Invalid argument.");
-                    }
+                List<TargetRegister> borrowedRegisters = new();
 
-                    // Arg2
-                    shortcut = root.Params[0].Params[1];
-                    if (shortcut.Type == ASTType.NumberLiteral) {
-                        jmp.Arg1 = shortcut.Value;
-                    } else if (shortcut.Type == ASTType.ExpressionIdentifier) {
-                        jmp.Arg1 = GetTargetRegisterName(new(shortcut.Value));
-                    } else if (shortcut.Type == ASTType.ExpressionOperator) {
-                        int register = GetUnusedRegister();
-                        borrowedRegisters.Add(register);
-                        targetRegister = new(register);
-                        jmp.Arg1 = GetTargetRegisterName(targetRegister);
-                        foreach (var asm in Compile(shortcut)) {
-                            yield return asm;
-                        }
-                    } else if (shortcut.Type == ASTType.BoolLiteral) {
-                        jmp.Arg1 = (shortcut.Value == "true") ? "1" : "0";
-                    } else {
-                        throw new Exception("Invalid argument.");
-                    }
+                // Arg1
+                TargetRegister? arg0 = null;
+                IEnumerable<ASM> instructions = CompileExpression(node.Params[0], ref arg0);
+                if (arg0 == null) throw new Exception("Expected a return register.");
+                if (((TargetRegister)arg0).IsNewRegister) {
+                    borrowedRegisters.Add((TargetRegister)arg0);
                 }
+                jmp.Arg0 = arg0.ToString();
 
-                foreach(int reg in borrowedRegisters) {
-                    registersUsed[reg] = false;
+
+                // Arg2
+                TargetRegister? arg1 = null;
+                instructions = instructions.Concat(CompileExpression(node.Params[1], ref arg1));
+                if (arg1 == null) throw new Exception("Expected a return register.");
+                if (((TargetRegister)arg1).IsNewRegister) {
+                    borrowedRegisters.Add((TargetRegister)arg1);
                 }
-                yield return jmp;
+                jmp.Arg1 = arg1.ToString();
+
+                foreach (TargetRegister reg in borrowedRegisters) {
+                    registers.RemoveRegister(reg);
+                }
+                return instructions.Concat(jmp);
             } else {
                 throw new Exception("Invalid condition");
             }
+        }
 
-            foreach(var instruct in CompileStatementBlock(root.Params[1])) {
-                yield return instruct;
+        private IEnumerable<ASM> CompileSelectionStatement(ASTNode node) {
+            if (node.Type != ASTType.SelectionStatement) throw new Exception("Expected selection type.");
+            if (node.Value != "if") {
+                throw new Exception("Unknown selection type.");
             }
 
-            if (root.Params.Count > 2) { // Else or else if
-                string label2Name = GetLabelName();
+            string else_label;
+            bool always_true;
+            bool always_false;
+            IEnumerable<ASM> instructions = GetJumpStatementFromCondition(node.Params[0], out else_label, out always_true, out always_false);
+
+            if (always_true) {
+                // Since the statement is always true, always run block A without adding any jumps
+                return instructions.Concat(CompileStatementBlock(node.Params[1]));
+            } else if (always_false) {
+                // Only applies for "else" or "else if" conditions.
+                // If statement always false, always run block B without adding any jumps
+                if (node.Params.Count > 2) {
+                    if (node.Params[2].Type == ASTType.SelectionStatement) {
+                        return instructions.Concat(CompileSelectionStatement(node.Params[2]));
+                    } else {
+                        return instructions.Concat(CompileStatementBlock(node.Params[2]));
+                    }
+                }
+                return instructions;
+            }
+
+            instructions = instructions.Concat(CompileStatementBlock(node.Params[1]));
+
+            if (node.Params.Count > 2) { // Else or else if
+                string label2 = registers.GetLabelName();
 
                 ASM jump2 = new();
                 jump2.Op = OpCode.jmp;
-                jump2.Arg0 = label2Name;
-                yield return jump2;
+                jump2.Arg0 = label2;
+                instructions = instructions.Concat(jump2);
 
-                ASM label1 = new();
-                label1.Label = exitLabelName;
-                yield return label1;
+                ASM label1asm = new();
+                label1asm.Label = else_label;
+                instructions = instructions.Concat(label1asm);
 
                 // statement block
-                IEnumerable<ASM> block;
-                if (root.Params[2].Type == ASTType.SelectionStatement) {
-                    block = CompileSelectionStatement(root.Params[2]);
+                if (node.Params[2].Type == ASTType.SelectionStatement) {
+                    instructions = instructions.Concat(CompileSelectionStatement(node.Params[2]));
                 } else {
-                    block = CompileStatementBlock(root.Params[2]);
+                    instructions = instructions.Concat(CompileStatementBlock(node.Params[2]));
                 }
-                foreach(var instruct in block) {
-                    yield return instruct;
-                }
-
-                exitLabelName = label2Name;
+                else_label = label2;
             }
 
             ASM exitLabel = new();
-            exitLabel.Label = exitLabelName;
-            yield return exitLabel;
-            yield break;
-
+            exitLabel.Label = else_label;
+            return instructions.Concat(exitLabel);
         }
+
     }
 }

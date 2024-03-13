@@ -28,20 +28,13 @@ namespace Bumblebee_Compiler {
      *  params[0] = ExpressionIdentifier or ExpressionIndexer: target save location
      *  params[1] = ExpressionStatement
      *  
-     *  
-     *  ExpressionStatement:
-     *      3;
-     *      2 * (3 + 5);
-     *      func(params);
-     *  value = null
-     *  params[0] = Expression
-     *  
+     *  DEFINITION:
      *  Expression:
      *      3;
      *      2 * (3 + 5);
      *      func(params);
-     *  value = null
-     *  params[0] = ExpressionOperator or ExpressionNumber or ExpressionIdentifier or ExpressionIndexer or Expression: value
+     *  Expression: ExpressionOperator or NumberLiteral or BoolLiteral, ExpressionIdentifier or ExpressionIndexer: value
+     *  
      *      
      *      
      *  ExpressionOperator
