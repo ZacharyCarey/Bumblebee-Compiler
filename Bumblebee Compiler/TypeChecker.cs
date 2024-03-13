@@ -40,6 +40,9 @@ namespace Bumblebee_Compiler {
                 case ASTType.IterationStatement:
                     walkIterationStatement(root);
                     return "void";
+                case ASTType.SelectionStatement:
+                    walkSelectionStatement(root);
+                    return "void";
                 default:
                     throw new Exception("Unknown statement.");
             }
@@ -147,8 +150,8 @@ namespace Bumblebee_Compiler {
                 case "<=":
                 case ">=":
                 case "==":
-                    if (leftType != "uint8") throw new Exception($"Operator {root.Value} requires int type operand.");
-                    if (rightType != "uint8") throw new Exception($"Operator {root.Value} requires int type operand.");
+                case "!=":
+                    if (leftType != rightType) throw new Exception($"Operator {root.Value} must be the same type.");
                     return "bool";
                 default:
                     throw new Exception("Unknown operator");
@@ -168,35 +171,59 @@ namespace Bumblebee_Compiler {
         string walkExpressionIdentifier(ASTNode root, bool isWriting, bool isReading) {
             if (root.Type != ASTType.ExpressionIdentifier) throw new Exception("Expected identifier");
             string name = root.Value;
-            if (!knownVariables.ContainsKey(name)) throw new Exception($"Unknown variable name '{name}'");
-            VariableOptions variable = knownVariables[name];
+
+            VariableOptions variable = new();
+ /*           if (name == "false" || name == "true") {
+                variable.IsReadable = true;
+                variable.IsWritable = false;
+                variable.TypeName = "bool";
+            } else {*/
+                if (!knownVariables.ContainsKey(name)) throw new Exception($"Unknown variable name '{name}'");
+                variable = knownVariables[name];
+            //}
+
             if (isWriting && !variable.IsWritable) throw new Exception($"Variable '{name}' is not writable.");
             if (isReading && !variable.IsReadable) throw new Exception($"Variable '{name}' is not readable.");
             return variable.TypeName;
+        }
+
+        private string getConditionType(ASTNode param) {
+            switch (param.Type) {
+                case ASTType.BoolLiteral: return walkBoolLiteral(param);
+                case ASTType.ExpressionOperator: return walkExpressionOperator(param);
+                case ASTType.ExpressionIdentifier: return walkExpressionIdentifier(param, false, true);
+                // TODO expression indexer
+                default:
+                    throw new Exception("Invalid condition.");
+            }
         }
 
         void walkIterationStatement(ASTNode root) {
             if (root.Type != ASTType.IterationStatement) throw new Exception("Iteration expected");
             if (root.Value != "while") throw new Exception("Unknown iteration");
 
-            string conditionType = "void";
-            switch(root.Params[0].Type) {
-                case ASTType.BoolLiteral:
-                    conditionType = walkBoolLiteral(root.Params[0]);
-                    break;
-                case ASTType.ExpressionOperator:
-                    conditionType = walkExpressionOperator(root.Params[0]);
-                    break;
-                case ASTType.ExpressionIdentifier:
-                    conditionType = walkExpressionIdentifier(root.Params[0], false, true);
-                    break;
-                // TODO expression indexer
-                default:
-                    throw new Exception("Invalid condition.");
-            }
-
+            string conditionType = getConditionType(root.Params[0]);
             if (conditionType != "bool") throw new Exception("Condition must be a bool type.");
+
             walkStatementBlock(root.Params[1]);
+        }
+
+        void walkSelectionStatement(ASTNode root) {
+            if (root.Type != ASTType.SelectionStatement) throw new Exception("Selection expected");
+            if (root.Value != "if") throw new Exception("Unknown selection");
+
+            string conditionType = getConditionType(root.Params[0]);
+            if (conditionType != "bool") throw new Exception("Condition must be a bool type.");
+
+            walkStatementBlock(root.Params[1]);
+
+            if (root.Params.Count > 2) {
+                if (root.Params[2].Type == ASTType.SelectionStatement) {
+                    walkSelectionStatement(root.Params[2]);
+                } else {
+                    walkStatementBlock(root.Params[2]);
+                }
+            }
         }
 
         void walkExpressionIndexer(ASTNode root) {

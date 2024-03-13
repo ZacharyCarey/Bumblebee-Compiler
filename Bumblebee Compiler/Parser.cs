@@ -78,6 +78,14 @@ namespace Bumblebee_Compiler {
      *  Value = "while"
      *  params[0] = Condition: BoolLiteral, ExpressionOperator, ExpressionIdentifier, ExpressionIndexer
      *  params[1] = Code block: StatementBlock
+     *  
+     *  
+     *  
+     *  SelectionStatement
+     *  Value = "if" or "else"
+     *  params[0] = Condition: BoolLiteral, ExpressionOperator, ExpressionIdentifier, ExpressionIndexer
+     *  params[1] = Code block: StatementBlock
+     *  Params[2] = (Optional in presence of 'else') Code block: StatementBlock or SelectionStatement
      */
     public class ASTNode {
         public ASTType Type;
@@ -102,6 +110,7 @@ namespace Bumblebee_Compiler {
         DeclarationStatement,
         ExpressionAssignmentStatement,
         IterationStatement,
+        SelectionStatement,
 
         ExpressionOperator,
         NumberLiteral,
@@ -160,6 +169,9 @@ namespace Bumblebee_Compiler {
             if (token.Type == TokenType.Iteration) {
                 return walkIteration(tokens);
             }
+            if (token.Type == TokenType.Selection) {
+                return walkSelection(tokens);
+            }
 
             // Attempt to search for expression, or expression statement
             for(int i = current; i < tokens.Count; i++) {
@@ -191,6 +203,28 @@ namespace Bumblebee_Compiler {
             throw new Exception("Invalid iteration.");
         }
 
+        private ASTNode walkSelection(List<Token> tokens) {
+            Token token = tokens[current];
+            if (token.Type != TokenType.Selection) throw new Exception("Expected selection.");
+            if (token.Value != "if") throw new Exception("Invalid selection statement.");
+
+            ASTNode node = new ASTNode(ASTType.SelectionStatement, token.Value);
+            token = tokens[++current];
+            if (token.Type != TokenType.Paren || token.Value != "(") throw new Exception("Expected loop condition");
+            node.Params.Add(walkExpression(tokens, true));
+            node.Params.Add(walkStatementBlock(tokens));
+            token = tokens[current];
+            if (token.Type == TokenType.Selection && token.Value == "else") {
+                token = tokens[++current];
+                if (token.Type == TokenType.Selection && token.Value == "if") {
+                    node.Params.Add(walkSelection(tokens));
+                } else {
+                    node.Params.Add(walkStatementBlock(tokens));
+                }
+            }
+            return node;
+        }
+
         private ASTNode walkStatementBlock(List<Token> tokens) {
             Token token = tokens[current];
             if (token.Type != TokenType.Paren || token.Value != "{") throw new Exception("Invalid statement block. {");
@@ -211,11 +245,12 @@ namespace Bumblebee_Compiler {
 
         private ASTNode walkDeclarationStatement(List<Token> tokens) {
             Token token = tokens[current];
-            if (token.Type != TokenType.Identifier || token.Value != "uint8") throw new Exception("Invalid declaration statement.");
+            if (token.Type != TokenType.Identifier || (token.Value != "uint8" && token.Value != "bool")) throw new Exception("Invalid declaration statement.");
+            string type = token.Value;
             // Look ahead to see if there's an optional initialization
             if (tokens[current + 2].Type == TokenType.LineDelimiter) {
                 // Simple declaration
-                ASTNode statement = new ASTNode(ASTType.DeclarationStatement, "uint8");
+                ASTNode statement = new ASTNode(ASTType.DeclarationStatement, type);
                 token = tokens[++current];
                 statement.Params.Add(walkExpressionIdentifier(tokens));
                 token = tokens[current];
@@ -225,7 +260,7 @@ namespace Bumblebee_Compiler {
                 return statement;
             } else {
                 // Must be an expression initialization.
-                ASTNode statement = new ASTNode(ASTType.DeclarationStatement, "uint8");
+                ASTNode statement = new ASTNode(ASTType.DeclarationStatement, type);
                 token = tokens[++current];
                 int oldIndex = current; // I will explain this in a bit
                 statement.Params.Add(walkExpressionIdentifier(tokens));
@@ -288,6 +323,9 @@ namespace Bumblebee_Compiler {
                 token = tokens[++current];
             } else if (token.Type == TokenType.BoolLiteral) {
                 left = new ASTNode(ASTType.BoolLiteral, token.Value);
+                token = tokens[++current];
+            } else if (token.Type == TokenType.CharLiteral) {
+                left = new ASTNode(ASTType.NumberLiteral, ((int)token.Value[0]).ToString());
                 token = tokens[++current];
             } else if (token.Type == TokenType.Identifier) {
                 // TODO check for function

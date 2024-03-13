@@ -27,8 +27,10 @@ namespace Bumblebee_Compiler.Tokens {
         Comment,
         NumberLiteral,
         BoolLiteral,
+        CharLiteral,
         LineDelimiter,
         Operator,
-        Iteration
+        Iteration,
+        Selection
     }
 }

@@ -13,11 +13,14 @@ namespace Bumblebee_Compiler {
         //static Regex LETTERS = new Regex(@"[a-zA-Z]", options);
         static Regex WHITESPACE = new Regex(@"\s+", options);
         static Regex NUMBERS = new Regex(@"\d+", options);
-        static Regex BOOL_LITERAL = new Regex(@"true", options);
+        static Regex BOOL_LITERAL = new Regex(@"false|true", options);
+        static Regex CHAR_LITERAL = new Regex(@"'(.)'|'\\(.)'");
         static Regex COMMENT = new Regex(@"\/\/(.*)[\r\n]*$", options);
         static Regex IDENTIFIER = new Regex(@"[_a-zA-Z]\w*", options);
-        static Regex OPERATOR = new Regex(@"and|or|xor|not|>>|<<|<=|>=|>|<|==|[+\-*\/=%&|^~]", options);
+        static Regex OPERATOR = new Regex(@"and|or|xor|not|>>|<<|<=|>=|>|<|==|!=|[+\-*\/=%&|^~]", options);
         static Regex ITERATION = new Regex(@"while", options);
+        static Regex SELECTION = new Regex(@"if|else", options);
+        // TODO at the moment, elseif is accepted. Need regex to check for whitespace separators
 
         internal Tokenizer() {
         }
@@ -130,6 +133,13 @@ namespace Bumblebee_Compiler {
                     continue;
                 }
 
+                match = SELECTION.Match(input, current);
+                if (match.Success && match.Index == current) {
+                    yield return new Token(TokenType.Selection, match.Value);
+                    current += match.Length;
+                    continue;
+                }
+
                 match = WHITESPACE.Match(input, current);
                 if (match.Success && match.Index == current) {
                     //yield return new Token(TokenType.Whitespace, match.Value);
@@ -147,6 +157,34 @@ namespace Bumblebee_Compiler {
                 match = BOOL_LITERAL.Match(input, current);
                 if (match.Success && match.Index == current) {
                     yield return new Token(TokenType.BoolLiteral, match.Value);
+                    current += match.Length;
+                    continue;
+                }
+
+                match = CHAR_LITERAL.Match(input, current);
+                if (match.Success && match.Index == current) {
+                    char ch = match.Value[1];
+                    if (ch == '\\') {
+                        switch(match.Value[2]) {
+                            case '\'': 
+                            case '\"':
+                            case '\\':
+                                ch = match.Value[2];
+                                break;
+                            case '0': ch = '\0'; break;
+                            case 'a': ch = '\a'; break;
+                            case 'b': ch = '\b'; break;
+                            case 'f': ch = '\f'; break;
+                            case 'n': ch = '\n'; break;
+                            case 'r': ch = '\r'; break;
+                            case 't': ch = '\t'; break;
+                            case 'v': ch = '\v'; break;
+                            default: throw new Exception("Invalid escape character");
+                        }
+                    } else if (ch == '\'' || ch == '\"' || ch < ' ' || ch > '~') {
+                        throw new Exception("Invalid ASCII character.");
+                    }
+                    yield return new Token(TokenType.CharLiteral, ch.ToString());
                     current += match.Length;
                     continue;
                 }
