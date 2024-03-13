@@ -1,0 +1,25 @@
+uint8 disk_nr = input;
+uint8 source = input;
+uint8 destination = input;
+uint8 spare = input;
+
+const uint8 MAGNET_ON = 5;
+
+Hanoi(disk_nr, source, destination, spare);
+
+void Hanoi(uint8 disk_nr, uint8 source, uint8 dest, uint8 spare) {
+	if (disk_nr == 0) {
+		MoveAlloy(source, dest);
+	} else {
+		Hanoi(disk_nr - 1, source, spare, dest);
+		MoveAlloy(source, dest);
+		Hanoi(disk_nr - 1, spare, dest, source);
+	}
+}
+
+void MoveAlloy(uint8 source, uint8 dest) {
+	output = source;
+	output = MAGNET_ON; // Turns on magnet
+	output = dest;
+	output = MAGNET_ON; // Turns off magnet
+}

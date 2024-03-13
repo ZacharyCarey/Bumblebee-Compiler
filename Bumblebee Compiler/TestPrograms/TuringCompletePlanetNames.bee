@@ -1,0 +1,15 @@
+bool first = true;
+while(true) {
+	uint8 c = input;
+	if (c == ' ') {
+		first = true;
+		output = ' ';
+	} else {
+		if (first == true) {
+			output = (c - 'a') + 'A';
+		} else {
+			output = c;
+		}
+		first = false;
+	}
+}
