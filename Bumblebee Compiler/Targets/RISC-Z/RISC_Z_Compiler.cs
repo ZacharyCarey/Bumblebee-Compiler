@@ -35,15 +35,28 @@ namespace Bumblebee_Compiler.Targets.RISC_Z {
             }
         }
 
+        Dictionary<string, string> functions = new();
         bool[] registersUsed = new bool[20];
         Dictionary<string, int> registers = new();
         TargetRegister targetRegister = new();
         uint nextLabel = 0;
+        Stack<List<object>> context = new();
+        Dictionary<string, string> consts = new();
+
+        public RISC_Z_Registers (Dictionary<string, VariableOptions> variables, Dictionary<string, FunctionOptions> functions) {
+            foreach (var pair in variables) {
+                this.registers.Add(pair.Key, -1);
+            }
+            foreach(var pair in functions) {
+                this.functions.Add(pair.Key, pair.Value.ReturnType);
+            }
+        }
 
         public TargetRegister CreateRegister() {
             for (int i = 0; i < registersUsed.Length; i++) {
                 if (registersUsed[i] == false) {
                     registersUsed[i] = true;
+                    context.Peek().Add(i);
                     return new TargetRegister(i, true);
                 }
             }
@@ -61,9 +74,12 @@ namespace Bumblebee_Compiler.Targets.RISC_Z {
             }
 
             if (registers.ContainsKey(varName)) throw new Exception("Variable already exists");
+            if (consts.ContainsKey(varName)) throw new Exception("Variable already exists");
+            if (functions.ContainsKey(varName)) throw new Exception("Function name already exists.");
 
             TargetRegister newReg = CreateRegister();
             registers[varName] = newReg.number;
+            context.Peek().Add(varName);
             return newReg;
         }
 
@@ -77,8 +93,15 @@ namespace Bumblebee_Compiler.Targets.RISC_Z {
                     return new TargetRegister(varName);
             }
 
-            int register = registers[varName];
-            return new TargetRegister(register, false);
+            if (registers.ContainsKey(varName)) {
+                int register = registers[varName];
+                if (register < -1) throw new Exception("Tried to read predefined variable name");
+                return new TargetRegister(register, false);
+            } else if (consts.ContainsKey(varName)) {
+                return new TargetRegister(consts[varName]);
+            } else {
+                throw new Exception("Can't find variable name");
+            }
         }
 
         public void RemoveRegister(TargetRegister register) {
@@ -99,6 +122,55 @@ namespace Bumblebee_Compiler.Targets.RISC_Z {
             }
             return name;
         }
+
+        public void CreateContext() {
+            context.Push(new());
+        }
+
+        public void RemoveContext() {
+            var variables = context.Pop();
+            foreach(var variable in variables) {
+                if (variable is int registerNumber) {
+                    registersUsed[registerNumber] = false;
+                } else if (variable is string variableName) {
+                    if (consts.ContainsKey(variableName)) consts.Remove(variableName);
+                    if (registers.ContainsKey(variableName)) registers.Remove(variableName);
+                } else {
+                    throw new Exception("Unknown register type");
+                }
+            }
+        }
+
+        public IEnumerable<int> GetContextDifference(int targetContext) {
+            foreach(var currentContext in context.Zip(Enumerable.Range(0, context.Count))){
+                if (currentContext.Second < targetContext) continue;
+                foreach(var register in currentContext.First) {
+                    if (register is int registerNumber) {
+                        yield return registerNumber;
+                    }
+                }
+            }
+        }
+
+        public void AddConst(string name, string value) {
+            if (registers.ContainsKey(name)) throw new Exception("Variable already exists");
+            if (consts.ContainsKey(name)) throw new Exception("Variable already exists");
+            if (functions.ContainsKey(name)) throw new Exception("Function already exists.");
+            consts.Add(name, value);
+            context.Peek().Add(name);
+        }
+
+        public void AddFunction(string name, string returnType) {
+            if (registers.ContainsKey(name)) throw new Exception("Variable already exists");
+            if (consts.ContainsKey(name)) throw new Exception("Variable already exists");
+            if (functions.ContainsKey(name)) throw new Exception("Function already exists");
+            functions.Add(name, returnType);
+        }
+
+        public string GetFunctionReturnType(string name) {
+            string type = functions[name];
+            return functions[name];
+        }
     }
 
     internal class RISC_Z_Compiler : ICompiler {
@@ -110,17 +182,29 @@ namespace Bumblebee_Compiler.Targets.RISC_Z {
             {"stack", new() {IsReadable = true, IsWritable = true, TypeName = "uint8"} }
         };
 
-        public Dictionary<string, FunctionOptions> KnownFunctions => new() {
-            
-        };
+        public Dictionary<string, FunctionOptions> KnownFunctions => new(){ };
 
         StreamWriter writer = null;
         RISC_Z_Registers registers = null;
 
-        public void Compile(ASTNode program, StreamWriter outputFile) {
+        public void Compile(Parser program, StreamWriter outputFile) {
             writer = outputFile;
-            registers = new();
-            foreach(var instruction in CompileStatementBlock(program)) {
+            registers = new(KnownVariables, KnownFunctions);
+
+            CompileFunctionDefinitions(program.Functions);
+
+            registers.CreateContext();
+            foreach(var instruction in CompileStatementBlock(program.AST, false)) {
+                outputFile.WriteLine(instruction.ToString());
+            }
+
+            ASM reset = new();
+            reset.Op = OpCode.jmp;
+            reset.Arg0 = "0";
+            outputFile.WriteLine(reset.ToString());
+            outputFile.WriteLine();
+
+            foreach(var instruction in CompileFunctionImplementations(program.Functions)) {
                 outputFile.WriteLine(instruction.ToString());
             }
         }
@@ -144,7 +228,11 @@ namespace Bumblebee_Compiler.Targets.RISC_Z {
             jmp_gt = 0b10011,
             jmp_gte = 0b10100,
             jmp_lt = 0b10101,
-            jmp_lte = 0b10110
+            jmp_lte = 0b10110,
+            call = 0b11000,
+            ret = 0b11001,
+            //rram = 0b11010, // addr, index, dst
+            //wram = 0b11011 // addr, index, arg2
         }
 
         struct ASM : IEnumerable<ASM> {
@@ -161,7 +249,13 @@ namespace Bumblebee_Compiler.Targets.RISC_Z {
             public ASM() { }
 
             public override string ToString() {
-                if (Comment != null) return "# " + Comment;
+                if (Comment != null) {
+                    if (Comment != "") {
+                        return "# " + Comment;
+                    } else {
+                        return Comment;
+                    }
+                }
                 if (Label != null) return "label " + Label;
 
                 string asm = Op.ToString();
@@ -205,11 +299,14 @@ namespace Bumblebee_Compiler.Targets.RISC_Z {
                         return asm;
                     case OpCode.not:
                     case OpCode.load:
+                    case OpCode.call:
                         asm += " " + arg0;
                         asm += " " + arg1;
                         return asm;
                     case OpCode.jmp:
                         asm += " " + arg0;
+                        return asm;
+                    case OpCode.ret:
                         return asm;
                     default:
                         throw new Exception("Unknown opcode.");
@@ -250,7 +347,117 @@ namespace Bumblebee_Compiler.Targets.RISC_Z {
             }
         }
 
+        private void CompileFunctionDefinitions(List<ASTNode> functions) {
+            foreach(ASTNode function in functions) {
+                if (function.Params[0].Type != ASTType.ExpressionIdentifier) throw new Exception("Expected function name");
+                string name = function.Params[0].Value;
+                registers.AddFunction(name, function.Value);
+            }
+        }
+
+        private IEnumerable<ASM> CompileFunctionImplementations(List<ASTNode> functions) {
+            // TODO something needs to check for return statements
+            foreach (ASTNode function in functions) {
+                registers.CreateContext();
+
+                ASM func_label = new();
+                func_label.Label = function.Params[0].Value;
+                yield return func_label;
+
+                // Pop parameters from the stack in reverse order
+                foreach(ASTNode argument in function.Params.Skip(2).Reverse()) {
+                    if (argument.Type != ASTType.FunctionArgument) throw new Exception("Expected function argument");
+                    if (argument.Params[0].Type != ASTType.ExpressionIdentifier) throw new Exception("Expected argument name");
+                    string argumentName = argument.Params[0].Value;
+                    TargetRegister register = registers.CreateRegister(argumentName);
+
+                    ASM load = new();
+                    load.Op = OpCode.load;
+                    load.Arg0 = "stack";
+                    load.Arg1 = register.ToString();
+                    yield return load;
+                }
+
+                // Compile body
+                foreach(var instruction in CompileStatementBlock(function.Params[1])) {
+                    yield return instruction;
+                }
+
+                registers.RemoveContext();
+
+                // TODO cant return on a non-void function
+                ASM ret = new();
+                ret.Op = OpCode.ret;
+                yield return ret;
+
+                ASM emptyLine = new();
+                emptyLine.Comment = "";
+                yield return emptyLine;
+            }
+        }
+
+        private IEnumerable<ASM> CompileFunctionCall(ASTNode node, ref TargetRegister? target) {
+            if (node.Type != ASTType.FunctionCall) throw new Exception("Expected function call");
+            string returnType = registers.GetFunctionReturnType(node.Value);
+
+            // Find which registers need to be stored
+            List<string> callRegisters = new();
+            foreach(int register in registers.GetContextDifference(1)) {
+                if (register >= 8) throw new Exception($"Unable to store register {register} for function call.");
+                callRegisters.Add("creg" + register);
+            }
+
+            IEnumerable<ASM> instructions = Enumerable.Empty<ASM>();
+
+            // Load argument onto the stack
+            foreach (var argument in node.Params) {
+                TargetRegister? stack = new TargetRegister("stack");
+                instructions = instructions.Concat(CompileExpression(argument, ref stack));
+                if (stack != null) {
+                    ASM load = new();
+                    load.Op = OpCode.load;
+                    load.Arg0 = stack.ToString();
+                    load.Arg1 = "stack";
+                    instructions = instructions.Concat(load);
+                }
+            }
+
+            // Call function
+            ASM call = new();
+            call.Op = OpCode.call;
+            call.Arg0 = node.Value;
+            if (callRegisters.Count == 0) {
+                call.Arg1 = "none";
+            } else {
+                call.Arg1 = string.Join("|", callRegisters);
+            }
+
+            instructions = instructions.Concat(call);
+
+            // pop return value from stack (optional)
+            if (returnType != "void") {
+                throw new Exception("Return values are currently not supported");
+            }
+            if (target != null) {
+                throw new Exception("Cant return value from void type function.");
+            }
+
+            return instructions;
+        }
+
+        private IEnumerable<ASM> CompileFunctionReturn(ASTNode node) {
+            if (node.Type != ASTType.FunctionReturn) throw new Exception("Expected function return");
+
+            // TODO load return value into the stack
+
+            ASM ret = new();
+            ret.Op = OpCode.ret;
+
+            return ret;
+        }
+
         private IEnumerable<ASM> CompileComment(ASTNode node) {
+            // TODO comments save a blank line
             if (node.Type != ASTType.Comment) throw new Exception("Expected comment.");
             ASM asm = new ASM();
             asm.Comment = node.Value;
@@ -286,7 +493,9 @@ namespace Bumblebee_Compiler.Targets.RISC_Z {
         /// </summary>
         private IEnumerable<ASM> CompileExpression(ASTNode node, ref TargetRegister? target) {
             TargetRegister result;
-            if (node.Type == ASTType.NumberLiteral) {
+            if (node.Type == ASTType.FunctionCall) {
+                return CompileFunctionCall(node, ref target);
+            } else if (node.Type == ASTType.NumberLiteral) {
                 CompileNumberLiteral(node, out result);
                 target = result;
                 return Enumerable.Empty<ASM>();
@@ -391,12 +600,23 @@ namespace Bumblebee_Compiler.Targets.RISC_Z {
             return instructions;
         }
 
-        private IEnumerable<ASM> CompileStatementBlock(ASTNode node) {
+        private IEnumerable<ASM> CompileStatementBlock(ASTNode node, bool createContext = true) {
             if (node.Type != ASTType.StatementBlock) throw new Exception("Expected block statement.");
 
+            if (createContext) {
+                registers.CreateContext();
+            }
             foreach(ASTNode statement in node.Params) {
                 IEnumerable<ASM> instructions;
-                if (statement.Type == ASTType.DeclarationStatement) {
+                if (statement.Type == ASTType.FunctionCall) {
+                    TargetRegister? register = null;
+                    instructions = CompileFunctionCall(statement, ref register);
+                    if (register != null && ((TargetRegister)register).IsNewRegister) {
+                        registers.RemoveRegister((TargetRegister)register);
+                    }
+                } else if (statement.Type == ASTType.FunctionReturn) {
+                    instructions = CompileFunctionReturn(statement);
+                } else if (statement.Type == ASTType.DeclarationStatement) {
                     instructions = CompileDeclarationStatement(statement);
                 } else if (statement.Type == ASTType.ExpressionAssignmentStatement) {
                     instructions = CompileExpressionAssignmentStatement(statement);
@@ -415,6 +635,9 @@ namespace Bumblebee_Compiler.Targets.RISC_Z {
                 foreach(ASM asm in instructions) {
                     yield return asm;
                 }
+            }
+            if (createContext) {
+                registers.RemoveContext();
             }
         }
 
@@ -442,13 +665,53 @@ namespace Bumblebee_Compiler.Targets.RISC_Z {
 
             if (node.Params[0].Type != ASTType.ExpressionIdentifier) throw new Exception("Expected identifier.");
             string name = node.Params[0].Value;
-            TargetRegister register = registers.CreateRegister(name);
 
-            if (node.Params.Count > 1) {
-                return CompileExpressionAssignmentStatement(node.Params[1]);
-            } else {
-                return Enumerable.Empty<ASM>();
+            int index = 1;
+            bool isConst = false;
+            while (index < node.Params.Count && node.Params[index].Type == ASTType.VariableModifier) {
+                ref bool modifier = ref isConst;
+                switch (node.Params[index].Value) {
+                    case "const": modifier = ref isConst; break;
+                    default:
+                        throw new Exception("Unknown modifier");
+                }
+                if (modifier) throw new Exception("Modifier was listed twice");
+                modifier = true;
+                index++;
             }
+
+            if (isConst) {
+                if (index >= node.Params.Count) throw new Exception("Expected const value");
+
+                string value = null;
+                ASTNode constArg = node.Params[index].Params[1];
+                if (constArg.Type == ASTType.NumberLiteral) {
+                    value = constArg.Value;
+                } else if (constArg.Type == ASTType.BoolLiteral) {
+                    if (constArg.Value == "true") {
+                        value = "1";
+                    } else if (constArg.Value == "false") {
+                        value = "0";
+                    } else {
+                        throw new Exception("Invalid bool type");
+                    }
+                } else {
+                    throw new Exception("Invalid const type");
+                }
+                if (value == null) throw new Exception("Unexpected error.");
+                registers.AddConst(name, value);
+                return Enumerable.Empty<ASM>();
+            } else {
+                TargetRegister register = registers.CreateRegister(name);
+
+                if (index < node.Params.Count) {
+                    return CompileExpressionAssignmentStatement(node.Params[index]);
+                } else {
+                    return Enumerable.Empty<ASM>();
+                }
+            }
+
+
         }
 
         private IEnumerable<ASM> CompileIterationStatement(ASTNode node) {

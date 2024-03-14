@@ -13,14 +13,16 @@ namespace Bumblebee_Compiler {
 
     public struct FunctionOptions {
         public string ReturnType;
-        public string[] ArgumentTypes;
+        public List<string> ArgumentTypes = new();
+
+        public FunctionOptions() { }
     }
 
     public interface ICompiler {
 
         public Dictionary<string, VariableOptions> KnownVariables { get; }
         public Dictionary<string, FunctionOptions> KnownFunctions { get; }
-        public void Compile(ASTNode program, StreamWriter outputFile);
+        public void Compile(Parser program, StreamWriter outputFile);
 
     }
 }

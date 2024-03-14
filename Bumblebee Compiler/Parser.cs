@@ -14,7 +14,9 @@ namespace Bumblebee_Compiler {
      *      uint8 radius = 2;
      *      uint8 radius = 2 * (3 + 5);
      *  Value = type(uint8)
-     *  Params = [ExpressionIdentifier: name, (optional)ExpressionAssignment: value]
+     *  Params[0] = ExpressionIdentifier: name, 
+     *  Params[n] = VariableModifier: modifiers
+     *  Params[n+1] = (optional)ExpressionAssignment: value
      *  i.e. Declares a new variable (with type and name). Uses optional expression for in-line initialization.
      *  This could be a const number literal, or an expression that needs evaluated.
      *  When expression statement is used, it can be though of as a second line of code. This node
@@ -79,6 +81,27 @@ namespace Bumblebee_Compiler {
      *  params[0] = Condition: BoolLiteral, ExpressionOperator, ExpressionIdentifier, ExpressionIndexer
      *  params[1] = Code block: StatementBlock
      *  Params[2] = (Optional in presence of 'else') Code block: StatementBlock or SelectionStatement
+     *  
+     *  
+     *  FunctionDefinition
+     *  Value = "ReturnValue"
+     *  params[0] = ExpressionIdentifier functionName
+     *  params[1] = StatementBlock
+     *  params[n] = FunctionArgument parameters
+     *  
+     *  
+     *  FunctionCall
+     *  value = "FuncName"
+     *  params[n] = Expressions
+     *  
+     *  
+     *  FunctionReturn
+     *  params[0] = (optional)Expression returnValue
+     *  
+     *  
+     *  FunctionArgument
+     *  value = "ArgumentType"
+     *  params[0] = ExpressionIdentifier
      */
     public class ASTNode {
         public ASTType Type;
@@ -111,15 +134,17 @@ namespace Bumblebee_Compiler {
         ExpressionIdentifier,
         ExpressionIndexer,
         Comment,
-/*
-        SelectionStatement,
-        
-        JumpStatement*/
+        FunctionCall,
+        FunctionDefinition,
+        FunctionArgument,
+        FunctionReturn,
+        VariableModifier
     }
 
-    internal class Parser {
+    public class Parser {
 
-        internal ASTNode AST; // Abstract Syntax Tree
+        public ASTNode AST; // Abstract Syntax Tree
+        public List<ASTNode> Functions;
         private int current = 0;
 
         internal Parser() {
@@ -128,9 +153,15 @@ namespace Bumblebee_Compiler {
 
         internal void SyntaxAnalyzer(List<Token> tokens) {
             current = 0;
+            Functions = new();
             AST = new ASTNode(ASTType.StatementBlock, "Program");
             while (current < tokens.Count) {
-                AST.Params.Add(walkStatement(tokens));
+                Token debug = tokens[current];
+                ASTNode node = walkStatement(tokens);
+                //if (node == null) throw new Exception("Cant add null node");
+                if (node != null) {
+                    AST.Params.Add(node);
+                }
             }
         }
 
@@ -146,9 +177,37 @@ namespace Bumblebee_Compiler {
             }
         }
 
+        private bool isFunctionDefinition(List<Token> tokens) {
+            if (tokens[current].Type != TokenType.Identifier) return false;
+            if (current + 1 >= tokens.Count || tokens[current + 1].Type != TokenType.Identifier) return false;
+            if (current + 2 >= tokens.Count || tokens[current + 2].Type != TokenType.Paren) return false;
+            if (tokens[current + 2].Value != "(") return false;
+            return true;
+        }
+
+        private bool isFunctionCall(List<Token> tokens) {
+            if (tokens[current].Type != TokenType.Identifier) return false;
+            if (current + 1 >= tokens.Count || tokens[current + 1].Type != TokenType.Paren) return false;
+            if (tokens[current + 1].Value != "(") return false;
+            return true;
+        }
+
         private ASTNode walkStatement(List<Token> tokens) {
             Token token = tokens[current];
-            if (token.Type == TokenType.Identifier && IsValidType(token.Value)) {
+            if (isFunctionDefinition(tokens)) {
+                walkFunctionDefinition(tokens);
+                return null;
+            }
+            if (isFunctionCall(tokens)) {
+                ASTNode node = walkFunctionCall(tokens);
+                if (tokens[current].Type != TokenType.LineDelimiter) throw new Exception("Expected line delimiter");
+                current++;
+                return node;
+            }
+            if (token.Type == TokenType.Identifier && token.Value == "ret") {
+                return walkFunctionReturn(tokens);
+            }
+            if (token.Type == TokenType.VariableModifier || (token.Type == TokenType.Identifier && IsValidType(token.Value))) {
                 return walkDeclarationStatement(tokens);
             }
             if (token.Type == TokenType.Paren && token.Value == "{") {
@@ -187,9 +246,13 @@ namespace Bumblebee_Compiler {
             if (token.Value == "while") {
                 token = tokens[++current];
                 if (token.Type != TokenType.Paren || token.Value != "(") throw new Exception("Expected loop condition");
-                node.Params.Add(walkExpression(tokens, true));
+                ASTNode exp1 = walkExpression(tokens, true);
+                if (exp1 == null) throw new Exception("Cant add null node");
+                node.Params.Add(exp1);
                 token = tokens[current];
-                node.Params.Add(walkStatementBlock(tokens));
+                ASTNode exp2 = walkStatementBlock(tokens);
+                if (exp2 == null) throw new Exception("Cant add null node");
+                node.Params.Add(exp2);
                 return node;
             }
 
@@ -204,15 +267,22 @@ namespace Bumblebee_Compiler {
             ASTNode node = new ASTNode(ASTType.SelectionStatement, token.Value);
             token = tokens[++current];
             if (token.Type != TokenType.Paren || token.Value != "(") throw new Exception("Expected loop condition");
-            node.Params.Add(walkExpression(tokens, true));
-            node.Params.Add(walkStatementBlock(tokens));
+            ASTNode node1 = walkExpression(tokens, true);
+            ASTNode node2 = walkStatementBlock(tokens);
+            if (node1 == null || node2 == null) throw new Exception("Cant add null node");
+            node.Params.Add(node1);
+            node.Params.Add(node2);
             token = tokens[current];
             if (token.Type == TokenType.Selection && token.Value == "else") {
                 token = tokens[++current];
                 if (token.Type == TokenType.Selection && token.Value == "if") {
-                    node.Params.Add(walkSelection(tokens));
+                    ASTNode node3 = walkSelection(tokens);
+                    if (node3 == null) throw new Exception("Cant add null node");
+                    node.Params.Add(node3);
                 } else {
-                    node.Params.Add(walkStatementBlock(tokens));
+                    ASTNode node3 = walkStatementBlock(tokens);
+                    if (node3 == null) throw new Exception("Cant add null node");
+                    node.Params.Add(node3);
                 }
             }
             return node;
@@ -227,7 +297,9 @@ namespace Bumblebee_Compiler {
                 if (token.Type == TokenType.Paren && token.Value == "}") {
                     break;
                 }
-                statementBlock.Params.Add(walkStatement(tokens));
+                ASTNode node1 = walkStatement(tokens);
+                if (node1 == null) throw new Exception("Cant add null node");
+                statementBlock.Params.Add(node1);
                 token = tokens[current];
             }
 
@@ -238,15 +310,27 @@ namespace Bumblebee_Compiler {
 
         private ASTNode walkDeclarationStatement(List<Token> tokens) {
             Token token = tokens[current];
-            if (token.Type != TokenType.Identifier || (token.Value != "uint8" && token.Value != "bool")) throw new Exception("Invalid declaration statement.");
+
+            // Walk any number of modifiers
+            List<ASTNode> modifiers = new();
+            while (token.Type == TokenType.VariableModifier) {
+                modifiers.Add(new ASTNode(ASTType.VariableModifier, token.Value));
+                token = tokens[++current];
+            }
+
+            if (token.Type != TokenType.Identifier || !IsValidType(token.Value)) throw new Exception("Invalid declaration statement.");
+            
             string type = token.Value;
             // Look ahead to see if there's an optional initialization
             if (tokens[current + 2].Type == TokenType.LineDelimiter) {
                 // Simple declaration
                 ASTNode statement = new ASTNode(ASTType.DeclarationStatement, type);
                 token = tokens[++current];
-                statement.Params.Add(walkExpressionIdentifier(tokens));
+                ASTNode node1 = walkExpressionIdentifier(tokens);
+                if (node1 == null) throw new Exception("Cant add null node");
+                statement.Params.Add(node1);
                 token = tokens[current];
+                statement.Params.AddRange(modifiers);
                 // Double check there is a line delimiter
                 if (token.Type != TokenType.LineDelimiter) throw new Exception("Line end ';' expected.");
                 current++;
@@ -256,9 +340,13 @@ namespace Bumblebee_Compiler {
                 ASTNode statement = new ASTNode(ASTType.DeclarationStatement, type);
                 token = tokens[++current];
                 int oldIndex = current; // I will explain this in a bit
-                statement.Params.Add(walkExpressionIdentifier(tokens));
+                ASTNode node1 = walkExpressionIdentifier(tokens);
+                statement.Params.Add(node1);
                 current = oldIndex; // Now that we read the name for the declaration, we need to re-parse the name in the ExpressionAssignmentStatement
-                statement.Params.Add(walkExpressionAssignmentStatement(tokens));
+                statement.Params.AddRange(modifiers);
+                ASTNode node2 = walkExpressionAssignmentStatement(tokens);
+                statement.Params.Add(node2);
+                if (node1 == null || node2 == null) throw new Exception("Cant add null node");
                 // Note: ExpressionAssignmentStatement will have checked for the line delimitor already
                 return statement;
             }
@@ -273,7 +361,8 @@ namespace Bumblebee_Compiler {
 
         private ASTNode walkExpressionAssignmentStatement(List<Token> tokens) {
             ASTNode statement = new ASTNode(ASTType.ExpressionAssignmentStatement);
-            statement.Params.Add(walkExpressionIdentifier(tokens));
+            ASTNode node1 = walkExpressionIdentifier(tokens);
+            statement.Params.Add(node1);
             Token token = tokens[current];
             if (token.Type != TokenType.Operator || token.Value != "=") throw new Exception("Invalid ExpressionAssignmentStatement.");
             current++;
@@ -283,6 +372,7 @@ namespace Bumblebee_Compiler {
             }*/
             // NOTE: ExpressionStatement will consule the line delimiter for us
             statement.Params.Add(expression);
+            if (node1 == null || expression == null) throw new Exception("Cant add null node");
             return statement;
         }
 
@@ -298,11 +388,12 @@ namespace Bumblebee_Compiler {
         private ASTNode walkExpression(List<Token> tokens, bool single = false) {
             Token token = tokens[current];
 
-            // TODO check for function call
-
             ASTNode left;
             // Get first argument
-            if (token.Type == TokenType.Operator && (token.Value == "not" || token.Value == "~")) {
+            if (isFunctionCall(tokens)) {
+                left = walkFunctionCall(tokens);
+                token = tokens[current];
+            } else if (token.Type == TokenType.Operator && (token.Value == "not" || token.Value == "~")) {
                 left = walkOperator(tokens, null);
                 token = tokens[current];
             } else if (token.Type == TokenType.Paren && token.Value == "(") {
@@ -330,7 +421,7 @@ namespace Bumblebee_Compiler {
             }
 
             // Check for either operator or delimiter
-            if (single || token.Type == TokenType.LineDelimiter || (token.Type == TokenType.Paren && token.Value == ")")) {
+            if (single || token.Type == TokenType.LineDelimiter || (token.Type == TokenType.Paren && token.Value == ")") || token.Type == TokenType.ArgumentSeparator) {
                 return left;
             }
 
@@ -345,15 +436,114 @@ namespace Bumblebee_Compiler {
             ASTNode op = new ASTNode(ASTType.ExpressionOperator, token.Value);
             if (token.Value == "not" || token.Value == "~") {
                 // Left is null, we need to get the arg
-                op.Params.Add(walkExpression(tokens, true));
+                ASTNode node1 = walkExpression(tokens, true);
+                op.Params.Add(node1);
+                if (node1 == null) throw new Exception("Cant add null node");
             } else {
                 op.Params.Add(left);
                 current++;
-                op.Params.Add(walkExpression(tokens));
+                ASTNode node1 = walkExpression(tokens);
+                op.Params.Add(node1);
+                if (node1 == null || left == null) throw new Exception("Cant add null node");
             }
             // TODO order of operations? Just check if left or right is also an operator, and restructure tree as needed?
             return op;
         }
 
+        private void walkFunctionDefinition(List<Token> tokens) {
+            Token token = tokens[current];
+            if (token.Type != TokenType.Identifier) throw new Exception("Expected function type");
+            ASTNode node = new(ASTType.FunctionDefinition, token.Value);
+
+            token = tokens[++current];
+            if (token.Type != TokenType.Identifier) throw new Exception("Expected function name");
+            ASTNode node1 = walkExpressionIdentifier(tokens);
+            node.Params.Add(node1);
+            if (node1 == null) throw new Exception("Cant add null node");
+
+            token = tokens[current];
+            if (token.Type != TokenType.Paren || token.Value != "(") throw new Exception("Expected function definition.");
+            token = tokens[++current];
+
+            // Parse arguments
+            List<ASTNode> args = new();
+            if (token.Type != TokenType.Paren) {
+                while (true) {
+                    token = tokens[current];
+                    if (token.Type != TokenType.Identifier) throw new Exception("Expected argument type");
+                    string type = token.Value;
+
+                    token = tokens[++current];
+                    if (token.Type != TokenType.Identifier) throw new Exception("Expected argument name");
+
+                    ASTNode arg = new(ASTType.FunctionArgument, type);
+                    ASTNode node2 = walkExpressionIdentifier(tokens);
+                    arg.Params.Add(node2);
+                    args.Add(arg);
+                    if (node2 == null || arg == null) throw new Exception("Cant add null node");
+
+                    token = tokens[current];
+                    if (token.Type == TokenType.Paren) break;
+                    if (token.Type != TokenType.ArgumentSeparator) throw new Exception("Expected comma argument separater");
+                    current++;
+                }
+            }
+
+            if (current >= tokens.Count) throw new Exception("Expected function definition");
+            token = tokens[current];
+            if (token.Type != TokenType.Paren || token.Value != ")") throw new Exception("Expected closing parentheses");
+            token = tokens[++current];
+
+            // TODO verify value is returned
+            if (token.Type != TokenType.Paren || token.Value != "{") throw new Exception("Expected function definition");
+            ASTNode node3 = walkStatementBlock(tokens);
+            node.Params.Add(node3);
+            node.Params.AddRange(args);
+
+            Functions.Add(node);
+            if (node3 == null || node == null) throw new Exception("Cant add null node");
+        }
+
+        private ASTNode walkFunctionCall(List<Token> tokens) {
+            Token token = tokens[current];
+            if (token.Type != TokenType.Identifier) throw new Exception("Expected function name");
+            ASTNode node = new ASTNode(ASTType.FunctionCall, token.Value);
+
+            token = tokens[++current];
+            if (token.Type != TokenType.Paren || token.Value != "(") throw new Exception("Expected function definition.");
+            token = tokens[++current];
+
+            // Parse arguments
+            List<ASTNode> args = new();
+            if (token.Type != TokenType.Paren) {
+                while (true) {
+                    ASTNode node1 = walkExpression(tokens);
+                    node.Params.Add(node1);
+                    if (node1 == null) throw new Exception("Cant add null node");
+                    token = tokens[current];
+                    if (token.Type == TokenType.Paren) break;
+                    if (token.Type != TokenType.ArgumentSeparator) throw new Exception("Expected comma argument separater");
+                    current++;
+                }
+            }
+
+            if (current >= tokens.Count) throw new Exception("Expected function call");
+            token = tokens[current];
+            if (token.Type != TokenType.Paren || token.Value != ")") throw new Exception("Expected closing parentheses");
+            token = tokens[++current];
+
+            return node;
+        }
+
+        private ASTNode walkFunctionReturn(List<Token> tokens) {
+            Token token = tokens[current];
+            if (token.Type != TokenType.Identifier || token.Value != "ret") throw new Exception("Expected function return");
+
+            ASTNode node = new ASTNode(ASTType.FunctionReturn);
+            token = tokens[++current];
+
+            if (token.Type != TokenType.LineDelimiter) throw new Exception("Function returns are not yet supported. Expected line delimiter");
+            return node;
+        }
     }
 }

@@ -1,11 +1,12 @@
-uint8 disk_nr = input;
-uint8 source = input;
-uint8 destination = input;
-uint8 spare = input;
+//uint8 disk_nr = input;
+//uint8 source = input;
+//uint8 destination = input;
+//uint8 spare = input;
 
 const uint8 MAGNET_ON = 5;
 
-Hanoi(disk_nr, source, destination, spare);
+//Hanoi(disk_nr, source, destination, spare);
+Hanoi(input, input, input, input);
 
 void Hanoi(uint8 disk_nr, uint8 source, uint8 dest, uint8 spare) {
 	if (disk_nr == 0) {

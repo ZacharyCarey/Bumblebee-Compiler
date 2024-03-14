@@ -7,17 +7,82 @@ using System.Threading.Tasks;
 namespace Bumblebee_Compiler {
     internal class TypeChecker {
 
-        private Dictionary<string, VariableOptions> knownVariables = new();
+        private Stack<Dictionary<string, VariableOptions>> knownVariables = new();
         private Dictionary<string, FunctionOptions> knownFunctions = new();
 
         internal void CheckTypes(Parser parser, ICompiler compiler) {
-            this.knownVariables = compiler.KnownVariables;
+            this.knownVariables.Push(compiler.KnownVariables);
             this.knownFunctions = compiler.KnownFunctions;
-            walk(parser.AST);
+            walkFunctionDefinitions(parser.Functions);
+
+            if (parser.AST.Type != ASTType.StatementBlock) throw new Exception("Expected statement block.");
+            foreach (var node in parser.AST.Params) {
+                walk(node);
+            }
+
+            walkFunctionImplementations(parser.Functions);
+        }
+
+        private VariableOptions? FindVariable(string name) {
+            foreach(var context in knownVariables) {
+                foreach(var variable in context) {
+                    if (name == variable.Key) {
+                        return variable.Value;
+                    }
+                }
+            }
+            return null;
+        }
+
+        void walkFunctionDefinitions(List<ASTNode> functions) {
+            foreach (var function in functions) {
+                if (function.Type != ASTType.FunctionDefinition) throw new Exception("Expected function");
+                if (function.Params[0].Type != ASTType.ExpressionIdentifier) throw new Exception("Expected function name");
+                string funcName = function.Params[0].Value;
+                FunctionOptions opts = new();
+                opts.ReturnType = function.Value;
+
+                foreach (var arg in function.Params.Skip(2)) {
+                    if (arg.Type != ASTType.FunctionArgument) throw new Exception("Expected argument");
+                    if (arg.Params[0].Type != ASTType.ExpressionIdentifier) throw new Exception("Expected argument name");
+                    opts.ArgumentTypes.Add(arg.Value);
+                }
+
+                knownFunctions[funcName] = opts;
+            }
+        }
+
+        void walkFunctionImplementations(List<ASTNode> functions) {
+            foreach (var function in functions) {
+                knownVariables.Push(new());
+                if (function.Type != ASTType.FunctionDefinition) throw new Exception("Expected function");
+                if (function.Params[0].Type != ASTType.ExpressionIdentifier) throw new Exception("Expected function name");
+                string funcName = function.Params[0].Value;
+
+                foreach (var arg in function.Params.Skip(2)) {
+                    if (arg.Type != ASTType.FunctionArgument) throw new Exception("Expected argument");
+                    if (arg.Params[0].Type != ASTType.ExpressionIdentifier) throw new Exception("Expected argument name");
+                    VariableOptions variable = new();
+                    variable.IsReadable = true;
+                    variable.IsWritable = true;
+                    variable.TypeName = arg.Value;
+                    knownVariables.Peek().Add(arg.Params[0].Value, variable);
+                }
+
+                // Walk statement block without pushing our variables
+                if (function.Params[1].Type != ASTType.StatementBlock) throw new Exception("Expected statement block.");
+                foreach (var node in function.Params[1].Params) {
+                    walk(node);
+                }
+
+                knownVariables.Pop();
+            }
         }
 
         string walk(ASTNode root) {
             switch(root.Type) {
+                case ASTType.FunctionCall:
+                    return walkFunctionCall(root);
                 case ASTType.StatementBlock:
                     walkStatementBlock(root);
                     return "void";
@@ -48,11 +113,25 @@ namespace Bumblebee_Compiler {
             }
         }
 
+        string walkFunctionCall(ASTNode node) {
+            if (node.Type != ASTType.FunctionCall) throw new Exception("Expected function call.");
+            FunctionOptions func = knownFunctions[node.Value];
+            foreach(var arg in func.ArgumentTypes.Zip(node.Params)) {
+                string argType = walk(arg.Second);
+                if (arg.First != argType) {
+                    throw new Exception("Function call does not match function definition.");
+                }
+            }
+            return func.ReturnType;
+        }
+
         void walkStatementBlock(ASTNode root) {
             if (root.Type != ASTType.StatementBlock) throw new Exception("Expected statement block.");
+            knownVariables.Push(new());
             foreach (var node in root.Params) {
                 walk(node);
             }
+            knownVariables.Pop();
         }
 
         void walkDeclarationStatement(ASTNode root) {
@@ -63,19 +142,54 @@ namespace Bumblebee_Compiler {
             if (identifier.Type != ASTType.ExpressionIdentifier) throw new Exception("Expected identifier.");
             string name = identifier.Value;
 
-            if (knownVariables.ContainsKey(name) || knownFunctions.ContainsKey(name)) {
+            VariableOptions? variable = FindVariable(name);
+            if (variable != null || knownFunctions.ContainsKey(name)) {
                 throw new Exception($"The identifier '{name}' has been previously declared.");
+            }
+
+            int index = 1;
+            bool isConst = false;
+            while (index < root.Params.Count && root.Params[index].Type == ASTType.VariableModifier) {
+                ref bool modifier = ref isConst;
+                switch(root.Params[index].Value) {
+                    case "const": modifier = ref isConst; break;
+                    default:
+                        throw new Exception("Unknown modifier");
+                }
+                if (modifier) throw new Exception("Modifier was listed twice");
+                modifier = true;
+                index++;
             }
 
             VariableOptions options = new();
             options.IsReadable = true;
-            options.IsWritable = true;
+            options.IsWritable = !isConst;
             options.TypeName = type;
-            knownVariables.Add(name, options);
+            knownVariables.Peek().Add(name, options);
 
-            if (root.Params.Count > 1) {
-                if (root.Params[1].Type != ASTType.ExpressionAssignmentStatement) throw new Exception("Expected assignment statement");
-                walkExpressionAssignmentStatement(root.Params[1]);
+            if (index < root.Params.Count) {
+                if (isConst) {
+                    ASTNode assignment = root.Params[index];
+                    if (assignment.Type != ASTType.ExpressionAssignmentStatement) throw new Exception("Expected assignment.");
+                    ASTNode initialize = assignment.Params[1];
+                    if (initialize.Type == ASTType.BoolLiteral) {
+                        if (type != "bool") throw new Exception("initializer does not match type.");
+                    } else if (initialize.Type == ASTType.NumberLiteral) {
+                        if (type != "uint8") throw new Exception("initializer does not match type");
+                    } else {
+                        throw new Exception("Must be a static expression for const value.");
+                    }
+                } else {
+                    if (root.Params[index].Type != ASTType.ExpressionAssignmentStatement) throw new Exception("Expected assignment statement");
+                    walkExpressionAssignmentStatement(root.Params[1]);
+                }
+
+                index++;
+                if (index < root.Params.Count) {
+                    throw new Exception("Did not expect more arguments.");
+                }
+            } else {
+                if (isConst) throw new Exception("Constant values must be initialized");
             }
         }
 
@@ -172,15 +286,9 @@ namespace Bumblebee_Compiler {
             if (root.Type != ASTType.ExpressionIdentifier) throw new Exception("Expected identifier");
             string name = root.Value;
 
-            VariableOptions variable = new();
- /*           if (name == "false" || name == "true") {
-                variable.IsReadable = true;
-                variable.IsWritable = false;
-                variable.TypeName = "bool";
-            } else {*/
-                if (!knownVariables.ContainsKey(name)) throw new Exception($"Unknown variable name '{name}'");
-                variable = knownVariables[name];
-            //}
+            VariableOptions? knownVariable = FindVariable(name);
+            if (knownVariable == null) throw new Exception($"Unknown variable name '{name}'");
+            VariableOptions variable = (VariableOptions)knownVariable;
 
             if (isWriting && !variable.IsWritable) throw new Exception($"Variable '{name}' is not writable.");
             if (isReading && !variable.IsReadable) throw new Exception($"Variable '{name}' is not readable.");

@@ -20,88 +20,13 @@ namespace Bumblebee_Compiler {
         static Regex OPERATOR = new Regex(@"and|or|xor|not|>>|<<|<=|>=|>|<|==|!=|[+\-*\/=%&|^~]", options);
         static Regex ITERATION = new Regex(@"while", options);
         static Regex SELECTION = new Regex(@"if|else", options);
+        static Regex VARIABLE_MODIFIER = new Regex(@"const", options);
         // TODO at the moment, elseif is accepted. Need regex to check for whitespace separators
 
         internal Tokenizer() {
         }
 
         internal IEnumerable<Token> ParseTokens(string input) {
-            /*            Token token = new();
-                        bool tokenUsed = false; // Used to keep track of tokens that span multiple characters (like numbers)
-                        int c;
-                        while ((c = reader.Read()) >= 0) {
-                            if (char.IsWhiteSpace((char)c)) {
-                                // Spaces indicate end of tokens
-                                if (tokenUsed) {
-                                    yield return token;
-                                    tokenUsed = false;
-                                    token = new();
-                                }
-
-                                // Ignore whitespace between tokens
-                                continue;
-                            } else if (c >= '0' && c <= '9') {
-                                // Check for previvous tokens
-                                if (tokenUsed) {
-                                    if (token.Type == TokenType.Number) {
-                                        // Continue adding to the previous token
-                                        token.Value += (char)c;
-                                        continue;
-                                    } else {
-                                        // Reached the end of a token
-                                        yield return token;
-                                        // Fall through to create a new one for this token
-                                    }
-                                }
-
-                                // Start a new token
-                                tokenUsed = true;
-                                token.Type = TokenType.Number;
-                                token.Value = "" + (char)c;
-                            } else if (c == '(' || c == ')') {
-                                if (tokenUsed) {
-                                    yield return token;
-                                }
-                                token.Type = TokenType.Parenth;
-                                token.Value = "" + (char)c;
-                                yield return token;
-
-                                tokenUsed = false;
-                            } else if (c == '+') { 
-                                if (tokenUsed) {
-                                    // Return any previous tokens
-                                    yield return token;
-                                }
-
-                                tokenUsed = false;
-                                token.Type = TokenType.Operator;
-                                token.Value = "" + (char)c;
-                                yield return token;
-                            } else if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
-                                // Letters detected
-                                // Check for previvous tokens
-                                if (tokenUsed) {
-                                    if (token.Type == TokenType.Literal) {
-                                        // Continue adding to the previous token
-                                        token.Value += (char)c;
-                                        continue;
-                                    } else {
-                                        // Reached the end of a token
-                                        yield return token;
-                                        // Fall through to create a new one for this token
-                                    }
-                                }
-
-                                // Start a new token
-                                tokenUsed = true;
-                                token.Type = TokenType.Literal;
-                                token.Value = "" + (char)c;
-                            } else {
-                                //yield return ReadLiteral(c);
-                                throw new Exception($"Unknown char: \"{(char)c}\"");
-                            }
-                        }*/
-
             int current = 0;
             while (current < input.Length) {
                 char c = input[current];
@@ -115,6 +40,12 @@ namespace Bumblebee_Compiler {
 
                 if (c == ';') {
                     yield return new Token(TokenType.LineDelimiter, ";");
+                    current++;
+                    continue;
+                }
+
+                if (c == ',') {
+                    yield return new Token(TokenType.ArgumentSeparator, ",");
                     current++;
                     continue;
                 }
@@ -157,6 +88,13 @@ namespace Bumblebee_Compiler {
                 match = BOOL_LITERAL.Match(input, current);
                 if (match.Success && match.Index == current) {
                     yield return new Token(TokenType.BoolLiteral, match.Value);
+                    current += match.Length;
+                    continue;
+                }
+
+                match = VARIABLE_MODIFIER.Match(input, current);
+                if (match.Success && match.Index == current) {
+                    yield return new Token(TokenType.VariableModifier, match.Value);
                     current += match.Length;
                     continue;
                 }

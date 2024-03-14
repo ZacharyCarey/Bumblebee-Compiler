@@ -7,9 +7,9 @@ using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 
 
-string text = File.ReadAllText("TestPrograms/TuringCompleteAiShowdown.bee");
+string text = File.ReadAllText("TestPrograms/TuringCompleteTowerOfAlloy.bee");
 ICompiler compiler = new RISC_Z_Compiler();
-const string outputFile = "TuringCompleteAiShowdown.asm";
+const string outputFile = "TuringCompleteTowerOfAlloy.asm";
 
 
 // Read the text file into an array of objects with basic types
@@ -26,9 +26,10 @@ parser.SyntaxAnalyzer(tokens);
 var typeChecker = new TypeChecker();
 typeChecker.CheckTypes(parser, compiler);
 
-File.Delete(outputFile);
-using (StreamWriter writer = new(File.OpenWrite(outputFile))) {
-    compiler.Compile(parser.AST, writer);
+Directory.CreateDirectory("output");
+File.Delete("output/"+outputFile);
+using (StreamWriter writer = new(File.OpenWrite("output/" + outputFile))) {
+    compiler.Compile(parser, writer);
     writer.Flush();
 }
 

@@ -31,6 +31,8 @@ namespace Bumblebee_Compiler.Tokens {
         LineDelimiter,
         Operator,
         Iteration,
-        Selection
+        Selection,
+        ArgumentSeparator,
+        VariableModifier
     }
 }
