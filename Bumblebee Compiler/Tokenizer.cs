@@ -18,7 +18,7 @@ namespace Bumblebee_Compiler {
         static Regex COMMENT = new Regex(@"\/\/(.*)[\r\n]*$", options);
         static Regex IDENTIFIER = new Regex(@"[_a-zA-Z]\w*", options);
         static Regex OPERATOR = new Regex(@"and|or|xor|not|>>|<<|<=|>=|>|<|==|!=|[+\-*\/=%&|^~]", options);
-        static Regex ITERATION = new Regex(@"while", options);
+        static Regex ITERATION = new Regex(@"while|for", options);
         static Regex SELECTION = new Regex(@"if|else", options);
         static Regex VARIABLE_MODIFIER = new Regex(@"const", options);
         // TODO at the moment, elseif is accepted. Need regex to check for whitespace separators
@@ -46,6 +46,18 @@ namespace Bumblebee_Compiler {
 
                 if (c == ',') {
                     yield return new Token(TokenType.ArgumentSeparator, ",");
+                    current++;
+                    continue;
+                }
+
+                if (c == '[' || c == ']') {
+                    yield return new Token(TokenType.Indexer, c.ToString());
+                    current++;
+                    continue;
+                }
+
+                if (c == '.') {
+                    yield return new Token(TokenType.Accessor, ".");
                     current++;
                     continue;
                 }

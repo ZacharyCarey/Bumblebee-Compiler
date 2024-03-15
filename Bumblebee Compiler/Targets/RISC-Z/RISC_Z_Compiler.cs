@@ -35,13 +35,16 @@ namespace Bumblebee_Compiler.Targets.RISC_Z {
             }
         }
 
-        Dictionary<string, string> functions = new();
+        Dictionary<string, TypeName> functions = new();
         bool[] registersUsed = new bool[20];
         Dictionary<string, int> registers = new();
         TargetRegister targetRegister = new();
         uint nextLabel = 0;
         Stack<List<object>> context = new();
         Dictionary<string, string> consts = new();
+        Dictionary<string, int> ArrayAddress = new();
+        Dictionary<string, int> ArraySize = new();
+        int nextRAMLocation = 0;
 
         public RISC_Z_Registers (Dictionary<string, VariableOptions> variables, Dictionary<string, FunctionOptions> functions) {
             foreach (var pair in variables) {
@@ -83,6 +86,37 @@ namespace Bumblebee_Compiler.Targets.RISC_Z {
             return newReg;
         }
 
+        public TargetRegister CreateArray(string name, int size) {
+            switch(name) {
+                case "input":
+                case "output":
+                case "HI":
+                case "counter":
+                case "stack":
+                    throw new Exception("Can not create array for known-register");
+            }
+
+            if (registers.ContainsKey(name)) throw new Exception("Variable already exists");
+            if (consts.ContainsKey(name)) throw new Exception("Variable already exists");
+            if (functions.ContainsKey(name)) throw new Exception("Function name already exists");
+            if (ArrayAddress.ContainsKey(name)) throw new Exception("Array already exists.");
+
+            int addr = nextRAMLocation;
+            nextRAMLocation += size;
+            ArrayAddress.Add(name, addr);
+            ArraySize.Add(name, size);
+            context.Peek().Add(name);
+            return new TargetRegister(addr.ToString());
+        }
+
+        public TargetRegister GetArray(string name) {
+            return new TargetRegister(ArrayAddress[name].ToString());
+        }
+
+        public int GetArrayLength(string name) {
+            return ArraySize[name];
+        }
+
         public TargetRegister GetRegister(string varName) {
             switch (varName) {
                 case "input":
@@ -115,6 +149,11 @@ namespace Bumblebee_Compiler.Targets.RISC_Z {
             registersUsed[reg] = false;
         }
 
+        public void RemoveArray(string name) {
+            ArrayAddress.Remove(name);
+            ArraySize.Remove(name);
+        }
+
         public string GetLabelName() {
             string name = $"Label{nextLabel}";
             checked {
@@ -135,6 +174,8 @@ namespace Bumblebee_Compiler.Targets.RISC_Z {
                 } else if (variable is string variableName) {
                     if (consts.ContainsKey(variableName)) consts.Remove(variableName);
                     if (registers.ContainsKey(variableName)) registers.Remove(variableName);
+                    ArrayAddress.Remove(variableName);
+                    ArraySize.Remove(variableName);
                 } else {
                     throw new Exception("Unknown register type");
                 }
@@ -156,6 +197,7 @@ namespace Bumblebee_Compiler.Targets.RISC_Z {
             if (registers.ContainsKey(name)) throw new Exception("Variable already exists");
             if (consts.ContainsKey(name)) throw new Exception("Variable already exists");
             if (functions.ContainsKey(name)) throw new Exception("Function already exists.");
+            if (ArrayAddress.ContainsKey(name)) throw new Exception("Array already exists");
             consts.Add(name, value);
             context.Peek().Add(name);
         }
@@ -164,22 +206,23 @@ namespace Bumblebee_Compiler.Targets.RISC_Z {
             if (registers.ContainsKey(name)) throw new Exception("Variable already exists");
             if (consts.ContainsKey(name)) throw new Exception("Variable already exists");
             if (functions.ContainsKey(name)) throw new Exception("Function already exists");
-            functions.Add(name, returnType);
+            if (ArrayAddress.ContainsKey(name)) throw new Exception("Array already exists");
+            functions.Add(name, new TypeName(returnType));
         }
 
-        public string GetFunctionReturnType(string name) {
-            string type = functions[name];
-            return functions[name];
+        public TypeName GetFunctionReturnType(string name) {
+            TypeName type = functions[name];
+            return type;
         }
     }
 
     internal class RISC_Z_Compiler : ICompiler {
         public Dictionary<string, VariableOptions> KnownVariables => new(){
-            {"input", new() {IsReadable = true, IsWritable = false, TypeName = "uint8"} },
-            {"output", new() {IsReadable = false, IsWritable = true, TypeName = "uint8"} },
-            {"HI", new() {IsReadable = true, IsWritable = true, TypeName = "uint8"} },
-            {"counter", new() {IsReadable = true, IsWritable = true, TypeName = "uint8"} },
-            {"stack", new() {IsReadable = true, IsWritable = true, TypeName = "uint8"} }
+            {"input", new() {IsReadable = true, IsWritable = false, TypeName = new TypeName("uint8")} },
+            {"output", new() {IsReadable = false, IsWritable = true, TypeName = new TypeName("uint8")} },
+            {"HI", new() {IsReadable = true, IsWritable = true, TypeName = new TypeName("uint8")} },
+            {"counter", new() {IsReadable = true, IsWritable = true, TypeName = new TypeName("uint8")} },
+            {"stack", new() {IsReadable = true, IsWritable = true, TypeName = new TypeName("uint8")} }
         };
 
         public Dictionary<string, FunctionOptions> KnownFunctions => new(){ };
@@ -231,8 +274,8 @@ namespace Bumblebee_Compiler.Targets.RISC_Z {
             jmp_lte = 0b10110,
             call = 0b11000,
             ret = 0b11001,
-            //rram = 0b11010, // addr, index, dst
-            //wram = 0b11011 // addr, index, arg2
+            rram = 0b11010, // addr, index, dst
+            wram = 0b11011 // addr, index, arg2
         }
 
         struct ASM : IEnumerable<ASM> {
@@ -263,11 +306,12 @@ namespace Bumblebee_Compiler.Targets.RISC_Z {
                 string arg1 = Arg1;
                 string arg2 = Arg2;
                 int temp;
-                if (int.TryParse(Arg0, out temp)) {
+                bool isRam = (Op == OpCode.wram || Op == OpCode.rram);
+                if (int.TryParse(Arg0, out temp) ^ isRam) {
                     asm += "|arg0";
                     arg0 = Arg0;
                 }
-                if (int.TryParse(Arg1, out temp)) {
+                if (int.TryParse(Arg1, out temp) ^ isRam) {
                     asm += "|arg1";
                     arg1 = Arg1;
                 }
@@ -293,6 +337,8 @@ namespace Bumblebee_Compiler.Targets.RISC_Z {
                     case OpCode.jmp_gte:
                     case OpCode.jmp_lt:
                     case OpCode.jmp_lte:
+                    case OpCode.wram:
+                    case OpCode.rram:
                         asm += " " + arg0;
                         asm += " " + arg1;
                         asm += " " + arg2;
@@ -398,13 +444,16 @@ namespace Bumblebee_Compiler.Targets.RISC_Z {
 
         private IEnumerable<ASM> CompileFunctionCall(ASTNode node, ref TargetRegister? target) {
             if (node.Type != ASTType.FunctionCall) throw new Exception("Expected function call");
-            string returnType = registers.GetFunctionReturnType(node.Value);
+            TypeName returnType = registers.GetFunctionReturnType(node.Value);
 
             // Find which registers need to be stored
             List<string> callRegisters = new();
+            HashSet<int> seenRegister = new();
             foreach(int register in registers.GetContextDifference(1)) {
-                if (register >= 8) throw new Exception($"Unable to store register {register} for function call.");
-                callRegisters.Add("creg" + register);
+                if (seenRegister.Add(register)) {
+                    if (register >= 8) throw new Exception($"Unable to store register {register} for function call.");
+                    callRegisters.Add("creg" + register);
+                }
             }
 
             IEnumerable<ASM> instructions = Enumerable.Empty<ASM>();
@@ -435,7 +484,7 @@ namespace Bumblebee_Compiler.Targets.RISC_Z {
             instructions = instructions.Concat(call);
 
             // pop return value from stack (optional)
-            if (returnType != "void") {
+            if (returnType != new TypeName("void")) {
                 throw new Exception("Return values are currently not supported");
             }
             if (target != null) {
@@ -509,10 +558,24 @@ namespace Bumblebee_Compiler.Targets.RISC_Z {
             } else if (node.Type == ASTType.ExpressionOperator) {
                 return CompileExpressionOperator(node, ref target);
             } else if (node.Type == ASTType.ExpressionIndexer) {
-                throw new Exception();
+                return CompileIndexer(node, ref target);
+            } else if (node.Type == ASTType.Accessor) {
+                return CompileAccessor(node, ref target);
+            } else if (node.Type == ASTType.ExpressionAssignmentStatement) {
+                return CompileExpressionAssignmentStatement(node);
             } else {
                 throw new Exception("Invalid argument.");
             }
+        }
+
+        private IEnumerable<ASM> CompileAccessor(ASTNode node, ref TargetRegister? target) {
+            if (node.Type != ASTType.Accessor) throw new Exception("Expected accessor");
+            if (node.Value != "Length") throw new Exception("Unknown accessor");
+            if (node.Params[0].Type != ASTType.ExpressionIdentifier) throw new Exception("Expected identifier");
+            string name = node.Params[0].Value;
+            int len = registers.GetArrayLength(name);
+            target = new TargetRegister(len.ToString());
+            return Enumerable.Empty<ASM>();
         }
 
         /// <summary>
@@ -641,22 +704,73 @@ namespace Bumblebee_Compiler.Targets.RISC_Z {
             }
         }
 
+        private IEnumerable<ASM> CompileIndexer(ASTNode node, ref TargetRegister? target) {
+            if (node.Type != ASTType.ExpressionIndexer) throw new Exception("Expected indexer");
+
+            string name = node.Value;
+            TargetRegister array = registers.GetArray(name);
+
+            TargetRegister? index = null;
+            IEnumerable<ASM> instructions = CompileExpression(node.Params[0], ref index);
+            if (index == null) throw new Exception("Expected index value");
+
+            ASM read = new();
+            read.Op = OpCode.rram;
+            read.Arg0 = array.ToString();
+            read.Arg1 = index.ToString();
+            if (target == null) {
+                target = registers.CreateRegister();
+                read.Arg2 = target.ToString();
+            } else {
+                read.Arg2 = target.ToString();
+                target = null;
+            }
+            instructions = instructions.Concat(read);
+
+            return instructions;
+        }
+
         private IEnumerable<ASM> CompileExpressionAssignmentStatement(ASTNode node) {
             if (node.Type != ASTType.ExpressionAssignmentStatement) throw new Exception("Expected ExpressionAssignmentStatement.");
 
-            string name = node.Params[0].Value;
-            TargetRegister dest = registers.GetRegister(name);
-            TargetRegister? target = dest;
-            IEnumerable<ASM> instructions = CompileExpression(node.Params[1], ref target); // Value should be saved to target register
-            if (target != null) {
-                // Result was not saved to the target, so we need to do a load operation
-                ASM load = new ASM();
-                load.Op = OpCode.load;
-                load.Arg0 = target.ToString();
-                load.Arg1 = dest.ToString();
-                instructions = instructions.Concat(load);
+            if (node.Params[0].Type == ASTType.ExpressionIndexer) {
+                string name = node.Params[0].Value;
+                TargetRegister dest = registers.GetArray(name);
+
+                ASTNode indexer = node.Params[0].Params[0];
+                TargetRegister? index = null;
+                IEnumerable<ASM> instructions = CompileExpression(indexer, ref index);
+                if (index == null) throw new Exception("Expected index value");
+
+                TargetRegister? value = null;
+                instructions = instructions.Concat(CompileExpression(node.Params[1], ref value));
+                if (value == null) throw new Exception("Expected assignment value");
+
+                ASM write = new ASM();
+                write.Op = OpCode.wram;
+                write.Arg0 = dest.ToString();
+                write.Arg1 = index.ToString();
+                write.Arg2 = value.ToString();
+                instructions = instructions.Concat(write);
+
+                return instructions;
+            } else {
+                TargetRegister dest;
+                string name = node.Params[0].Value;
+                dest = registers.GetRegister(name);
+
+                TargetRegister? target = dest;
+                IEnumerable<ASM> instructions = CompileExpression(node.Params[1], ref target); // Value should be saved to target register
+                if (target != null) {
+                    // Result was not saved to the target, so we need to do a load operation
+                    ASM load = new ASM();
+                    load.Op = OpCode.load;
+                    load.Arg0 = target.ToString();
+                    load.Arg1 = dest.ToString();
+                    instructions = instructions.Concat(load);
+                }
+                return instructions;
             }
-            return instructions;
         }
 
         // TODO somewhere needs to check for using uninitialized variable
@@ -680,7 +794,9 @@ namespace Bumblebee_Compiler.Targets.RISC_Z {
                 index++;
             }
 
+            
             if (isConst) {
+                if (node.ValueType.IsArray) throw new Exception("Arrays can't be const");
                 if (index >= node.Params.Count) throw new Exception("Expected const value");
 
                 string value = null;
@@ -702,12 +818,17 @@ namespace Bumblebee_Compiler.Targets.RISC_Z {
                 registers.AddConst(name, value);
                 return Enumerable.Empty<ASM>();
             } else {
-                TargetRegister register = registers.CreateRegister(name);
-
-                if (index < node.Params.Count) {
-                    return CompileExpressionAssignmentStatement(node.Params[index]);
-                } else {
+                if (node.ValueType.IsArray) {
+                    registers.CreateArray(name, node.ValueType.ArrayLength);
                     return Enumerable.Empty<ASM>();
+                } else {
+                    TargetRegister register = registers.CreateRegister(name);
+
+                    if (index < node.Params.Count) {
+                        return CompileExpressionAssignmentStatement(node.Params[index]);
+                    } else {
+                        return Enumerable.Empty<ASM>();
+                    }
                 }
             }
 
@@ -716,65 +837,126 @@ namespace Bumblebee_Compiler.Targets.RISC_Z {
 
         private IEnumerable<ASM> CompileIterationStatement(ASTNode node) {
             if (node.Type != ASTType.IterationStatement) throw new Exception("Expected iteration type.");
-            if (node.Value != "while") {
+            if (node.Value == "while") {
+                string else_label;
+                bool always_true;
+                bool always_false;
+                IEnumerable<ASM> instructions = GetJumpStatementFromCondition(node.Params[0], out else_label, out always_true, out always_false);
+
+                if (always_true) {
+                    // Since the statement is always true, always run block A with a single jump
+                    ASM loop_label = new();
+                    loop_label.Label = registers.GetLabelName();
+                    yield return loop_label;
+
+                    foreach (var asm in CompileStatementBlock(node.Params[1])) {
+                        yield return asm;
+                    }
+
+                    ASM true_jmp = new();
+                    true_jmp.Op = OpCode.jmp;
+                    true_jmp.Arg0 = loop_label.Label;
+                    yield return true_jmp;
+                } else if (always_false) {
+                    // If statement always false, there is nothing to run
+                    yield break;
+                }
+
+                ASM cond_label = new();
+                cond_label.Label = registers.GetLabelName();
+                yield return cond_label;
+
+                foreach (var asm in instructions) {
+                    yield return asm;
+                }
+
+                foreach (var asm in CompileStatementBlock(node.Params[1])) {
+                    yield return asm;
+                }
+
+                ASM jmp = new();
+                jmp.Op = OpCode.jmp;
+                jmp.Arg0 = cond_label.Label;
+                yield return jmp;
+
+                ASM else_label_asm = new();
+                else_label_asm.Label = else_label;
+                yield return else_label_asm;
+
+                yield break;
+            } else if (node.Value == "for") {
+                bool always_true;
+                bool always_false;
+                string exitLabelName;
+                
+                registers.CreateContext();
+                if (node.Params[0] != null) {
+                    foreach (var asm in CompileDeclarationStatement(node.Params[0])) {
+                        yield return asm;
+                    }
+                }
+                IEnumerable<ASM> jumpAsm = GetJumpStatementFromCondition(node.Params[1], out exitLabelName, out always_true, out always_false);
+
+                if (always_false) {
+                    registers.RemoveContext();
+                    yield break;
+                }
+
+                ASM loopLabel = new();
+                loopLabel.Label = registers.GetLabelName();
+                yield return loopLabel;
+
+                if (!always_true) {
+                    foreach (var asm in jumpAsm) {
+                        yield return asm;
+                    }
+                }
+
+                foreach (var asm in CompileStatementBlock(node.Params[3], false)) {
+                    yield return asm;
+                }
+
+                if (node.Params[2] != null) {
+                    TargetRegister? target = null;
+                    foreach (var asm in CompileExpression(node.Params[2], ref target)) {
+                        yield return asm;
+                    }
+                }
+
+                ASM jump = new();
+                jump.Op = OpCode.jmp;
+                jump.Arg0 = loopLabel.Label;
+                yield return jump;
+
+                if (!always_true) {
+                    ASM exitLabel = new();
+                    exitLabel.Label = exitLabelName;
+                    yield return exitLabel;
+                }
+
+                registers.RemoveContext();
+
+                yield break;
+            } else {
                 throw new Exception("Unknown iteration type");
             }
-
-            string else_label;
-            bool always_true;
-            bool always_false;
-            IEnumerable<ASM> instructions = GetJumpStatementFromCondition(node.Params[0], out else_label, out always_true, out always_false);
-
-            if (always_true) {
-                // Since the statement is always true, always run block A with a single jump
-                ASM loop_label = new();
-                loop_label.Label = registers.GetLabelName();
-                instructions = loop_label;
-
-                instructions = instructions.Concat(CompileStatementBlock(node.Params[1]));
-
-                ASM true_jmp = new();
-                true_jmp.Op = OpCode.jmp;
-                true_jmp.Arg0 = loop_label.Label;
-                return instructions.Concat(true_jmp);
-            } else if (always_false) {
-                // If statement always false, there is nothing to run
-                return Enumerable.Empty<ASM>();
-            }
-
-            ASM cond_label = new();
-            cond_label.Label = registers.GetLabelName();
-            instructions = cond_label.Concat(instructions);
-
-            instructions = instructions.Concat(CompileStatementBlock(node.Params[1]));
-
-            ASM jmp = new();
-            jmp.Op = OpCode.jmp;
-            jmp.Arg0 = cond_label.Label;
-            instructions = instructions.Concat(jmp);
-
-            ASM else_label_asm = new();
-            else_label_asm.Label = else_label;
-            instructions = instructions.Concat(else_label_asm);
-
-            return instructions;
         }
 
-        private IEnumerable<ASM> GetJumpStatementFromCondition(ASTNode node, out string else_label, out bool alwaysTrue, out bool alwaysFalse) {
+        private IEnumerable<ASM> GetJumpStatementFromCondition(ASTNode node, out string exit_label, out bool alwaysTrue, out bool alwaysFalse) {
             if (node.Type == ASTType.BoolLiteral) {
                 string boolean = node.Value;
                 if (boolean == "true") {
                     // Since the statement is always true, always run block A without adding any jumps
                     alwaysTrue = true;
                     alwaysFalse = false;
-                    else_label = null;
+                    exit_label = null;
                     return Enumerable.Empty<ASM>();
                 } else if (boolean == "false") {
                     // Only applies for "else" or "else if" conditions.
                     // If statement always false, always run block B without adding any jumps
                     alwaysTrue = false;
                     alwaysFalse = true;
-                    else_label = null;
+                    exit_label = null;
                     return Enumerable.Empty<ASM>();
                 } else {
                     throw new Exception("Invalid bool");
@@ -782,20 +964,20 @@ namespace Bumblebee_Compiler.Targets.RISC_Z {
             }else if (node.Type == ASTType.ExpressionIdentifier) {
                 alwaysTrue = false;
                 alwaysFalse = false;
-                else_label = registers.GetLabelName();
+                exit_label = registers.GetLabelName();
                 ASM jmp = new();
                 jmp.Op = OpCode.jmp_eq;
                 jmp.Arg0 = registers.GetRegister(node.Value).ToString();
                 jmp.Arg1 = "0";
-                jmp.Arg2 = else_label;
+                jmp.Arg2 = exit_label;
                 return jmp;
             } else if (node.Type == ASTType.ExpressionOperator) {
                 // TODO in certain cases, the jmp statement can be simplified / done in less instructions
                 alwaysFalse = false;
                 alwaysTrue = false;
-                else_label = registers.GetLabelName();
+                exit_label = registers.GetLabelName();
                 ASM jmp = new();
-                jmp.Arg2 = else_label;
+                jmp.Arg2 = exit_label;
 
                 switch (node.Value) {
                     case "and":

@@ -8,12 +8,12 @@ namespace Bumblebee_Compiler {
     public struct VariableOptions {
         public bool IsReadable;
         public bool IsWritable;
-        public string TypeName;
+        public TypeName TypeName;
     }
 
     public struct FunctionOptions {
-        public string ReturnType;
-        public List<string> ArgumentTypes = new();
+        public TypeName ReturnType;
+        public List<TypeName> ArgumentTypes = new();
 
         public FunctionOptions() { }
     }

@@ -33,6 +33,8 @@ namespace Bumblebee_Compiler.Tokens {
         Iteration,
         Selection,
         ArgumentSeparator,
-        VariableModifier
+        VariableModifier,
+        Indexer,
+        Accessor
     }
 }
