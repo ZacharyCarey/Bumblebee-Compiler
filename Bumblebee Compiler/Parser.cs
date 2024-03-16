@@ -519,7 +519,16 @@ namespace Bumblebee_Compiler {
                 // TODO check for function
                 left = walkExpressionIdentifier(tokens);
                 token = tokens[current];
-            } // TODO indexer
+            } else if (token.Type == TokenType.Operator) {
+                if (token.Value != "-") throw new Exception("Invalid operation");
+                token = tokens[++current];
+                left = new ASTNode(ASTType.ExpressionOperator, "-", new TypeName("uint8"));
+                ASTNode zero = new(ASTType.NumberLiteral, new("uint8"));
+                zero.Value = "0";
+                left.Params.Add(zero);
+                left.Params.Add(walkExpression(tokens, true));
+                token = tokens[current];
+            } // TODO indexer 
             else {
                 throw new Exception("Invalid expression.");
             }

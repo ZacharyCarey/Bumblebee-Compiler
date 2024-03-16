@@ -1,0 +1,42 @@
+const uint8 RIGHT = 0;
+const uint8 DOWN = 1;
+const uint8 LEFT = 2;
+const uint8 UP = 3;
+
+uint8 direction = 0;
+Hilbert(3, -1);
+
+void Hilbert(uint8 level, uint8 angle) {
+	if (level == 0) {
+		return;
+	}
+
+	// right(angle)
+	direction = direction + angle;
+
+	Hilbert(level - 1, -angle);
+
+	// Forward
+	output = direction & 3;
+
+	// left(angle)
+	direction = direction - angle;
+
+	Hilbert(level - 1, angle);
+
+	// Forward
+	output = direction & 3;
+
+	Hilbert(level - 1, angle);
+
+	// left(angle)
+	direction = direction - angle;
+
+	// Forward
+	output = direction & 3;
+
+	Hilbert(level - 1, -angle);
+
+	// right(angle)
+	direction = direction + angle;
+}
