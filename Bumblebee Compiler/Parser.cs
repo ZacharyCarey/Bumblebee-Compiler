@@ -522,11 +522,15 @@ namespace Bumblebee_Compiler {
             } else if (token.Type == TokenType.Operator) {
                 if (token.Value != "-") throw new Exception("Invalid operation");
                 token = tokens[++current];
-                left = new ASTNode(ASTType.ExpressionOperator, "-", new TypeName("uint8"));
-                ASTNode zero = new(ASTType.NumberLiteral, new("uint8"));
-                zero.Value = "0";
-                left.Params.Add(zero);
-                left.Params.Add(walkExpression(tokens, true));
+                if (token.Type == TokenType.NumberLiteral) {
+                    left = new ASTNode(ASTType.NumberLiteral, "-" + token.Value, new TypeName("uint8"));
+                } else {
+                    left = new ASTNode(ASTType.ExpressionOperator, "-", new TypeName("uint8"));
+                    ASTNode zero = new(ASTType.NumberLiteral, new("uint8"));
+                    zero.Value = "0";
+                    left.Params.Add(zero);
+                    left.Params.Add(walkExpression(tokens, true));
+                }
                 token = tokens[current];
             } // TODO indexer 
             else {

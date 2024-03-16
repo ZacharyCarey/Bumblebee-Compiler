@@ -3,40 +3,18 @@ const uint8 DOWN = 1;
 const uint8 LEFT = 2;
 const uint8 UP = 3;
 
-uint8 direction = 0;
-Hilbert(3, -1);
+Hilbert(3, 3, 1);
 
-void Hilbert(uint8 level, uint8 angle) {
+void Hilbert(uint8 level, uint8 type, uint8 dir) {
 	if (level == 0) {
 		return;
 	}
 
-	// right(angle)
-	direction = direction + angle;
-
-	Hilbert(level - 1, -angle);
-
-	// Forward
-	output = direction & 3;
-
-	// left(angle)
-	direction = direction - angle;
-
-	Hilbert(level - 1, angle);
-
-	// Forward
-	output = direction & 3;
-
-	Hilbert(level - 1, angle);
-
-	// left(angle)
-	direction = direction - angle;
-
-	// Forward
-	output = direction & 3;
-
-	Hilbert(level - 1, -angle);
-
-	// right(angle)
-	direction = direction + angle;
+	Hilbert(level - 1, type + dir, -dir);
+	output = type % 4;
+	Hilbert(level - 1, type, dir);
+	output = (type + dir) % 4;
+	Hilbert(level - 1, type, dir);
+	output = (type + (dir * 2)) % 4;
+	Hilbert(level - 1, type - dir, -dir);
 }
