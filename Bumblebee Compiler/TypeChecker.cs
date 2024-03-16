@@ -350,7 +350,9 @@ namespace Bumblebee_Compiler {
                 case ASTType.BoolLiteral: return walkBoolLiteral(param);
                 case ASTType.ExpressionOperator: return walkExpressionOperator(param);
                 case ASTType.ExpressionIdentifier: return walkExpressionIdentifier(param, false, true);
-                // TODO expression indexer
+                case ASTType.FunctionCall:
+                    return knownFunctions[param.Value].ReturnType;
+                    // TODO expression indexer
                 default:
                     throw new Exception("Invalid condition.");
             }

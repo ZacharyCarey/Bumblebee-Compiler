@@ -183,7 +183,7 @@ namespace Bumblebee_Compiler.Targets.RISC_Z {
         }
 
         public IEnumerable<int> GetContextDifference(int targetContext) {
-            foreach(var currentContext in context.Zip(Enumerable.Range(0, context.Count))){
+            foreach(var currentContext in context.Reverse().Zip(Enumerable.Range(0, context.Count))){
                 if (currentContext.Second < targetContext) continue;
                 foreach(var register in currentContext.First) {
                     if (register is int registerNumber) {
@@ -485,10 +485,19 @@ namespace Bumblebee_Compiler.Targets.RISC_Z {
 
             // pop return value from stack (optional)
             if (returnType != new TypeName("void")) {
-                throw new Exception("Return values are currently not supported");
-            }
-            if (target != null) {
-                throw new Exception("Cant return value from void type function.");
+                if (target != null) {
+                    ASM load = new();
+                    load.Op = OpCode.load;
+                    load.Arg0 = "stack";
+                    load.Arg1 = target.ToString();
+                    instructions = instructions.Concat(load);
+                } else {
+                    target = new TargetRegister("stack");
+                }
+            } else {
+                if (target != null) {
+                    throw new Exception("Can't return value from void type function");
+                }
             }
 
             return instructions;
@@ -497,12 +506,26 @@ namespace Bumblebee_Compiler.Targets.RISC_Z {
         private IEnumerable<ASM> CompileFunctionReturn(ASTNode node) {
             if (node.Type != ASTType.FunctionReturn) throw new Exception("Expected function return");
 
-            // TODO load return value into the stack
+            IEnumerable<ASM> instructions = Enumerable.Empty<ASM>();
+
+            if (node.Params.Count > 0) {
+                // load return value into the stack
+                TargetRegister? target = new TargetRegister("stack");
+                instructions = instructions.Concat(CompileExpression(node.Params[0], ref target));
+                if (target != null) {
+                    ASM load = new();
+                    load.Op = OpCode.load;
+                    load.Arg0 = target.ToString();
+                    load.Arg1 = "stack";
+                    instructions = instructions.Concat(load);
+                }
+            }
 
             ASM ret = new();
             ret.Op = OpCode.ret;
+            instructions = instructions.Concat(ret);
 
-            return ret;
+            return instructions;
         }
 
         private IEnumerable<ASM> CompileComment(ASTNode node) {
@@ -961,6 +984,23 @@ namespace Bumblebee_Compiler.Targets.RISC_Z {
                 } else {
                     throw new Exception("Invalid bool");
                 }
+            } else if (node.Type == ASTType.FunctionCall) {
+                TypeName returnType = registers.GetFunctionReturnType(node.Value);
+                if (returnType.Name != "bool" || returnType.IsArray) throw new Exception("Invalid result");
+                alwaysTrue = false;
+                alwaysFalse = false;
+                exit_label = registers.GetLabelName();
+
+                TargetRegister? target = null;
+                IEnumerable<ASM> instructions = CompileFunctionCall(node, ref target);
+                if (target == null) throw new Exception("Expected return value");
+                
+                ASM jmp = new();
+                jmp.Op = OpCode.jmp_eq;
+                jmp.Arg0 = target.ToString();
+                jmp.Arg1 = "0";
+                jmp.Arg2 = exit_label;
+                return instructions.Concat(jmp);
             }else if (node.Type == ASTType.ExpressionIdentifier) {
                 alwaysTrue = false;
                 alwaysFalse = false;

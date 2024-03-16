@@ -1,0 +1,57 @@
+const uint8 TURN_LEFT = 0;
+const uint8 MOVE_FORWARD = 1;
+const uint8 TURN_RIGHT = 2;
+const uint8 NOP = 3;
+const uint8 USE = 4;
+const uint8 SHOOT = 5;
+const uint8 CONVEYOR_BELT = 92;
+
+// Get robot into position
+output = TURN_RIGHT;
+output = MOVE_FORWARD;
+output = TURN_RIGHT;
+output = MOVE_FORWARD;
+output = MOVE_FORWARD;
+output = MOVE_FORWARD;
+output = MOVE_FORWARD;
+output = TURN_RIGHT;
+output = MOVE_FORWARD;
+output = TURN_LEFT;
+output = MOVE_FORWARD;
+
+// Now do the fruit stuff
+uint8 n = 0;
+uint8[0] fruits; // Variable length array
+while(true) {
+	uint8 sight = input;
+	if (sight == CONVEYOR_BELT) {
+		output = NOP;
+	} else {
+		if (checkSeenFruit(sight)) {
+			useConsole();
+		} else {
+			addSeenFruit(sight);
+			output = NOP;
+		}
+	}
+}
+
+bool checkSeenFruit(uint8 fruit) {
+	for (uint8 i = 0; i < n; i = i + 1) {
+		if (fruits[i] == fruit) {
+			return true;
+		}
+	}
+	return false;
+}
+
+void addSeenFruit(uint8 fruit) {
+	fruits[n] = fruit;
+	n = n + 1;
+}
+
+void useConsole() {
+	output = TURN_RIGHT;
+	output = USE;
+	output = TURN_LEFT;
+}

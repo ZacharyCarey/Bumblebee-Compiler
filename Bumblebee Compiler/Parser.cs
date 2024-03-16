@@ -677,6 +677,11 @@ namespace Bumblebee_Compiler {
             ASTNode node = new ASTNode(ASTType.FunctionReturn, new());
             token = tokens[++current];
 
+            if (token.Type != TokenType.LineDelimiter) {
+                node.Params.Add(walkExpression(tokens));
+                token = tokens[current];
+            }
+
             if (readDelimiter) {
                 if (token.Type != TokenType.LineDelimiter) throw new Exception("Expected delimiter.");
                 current++;
