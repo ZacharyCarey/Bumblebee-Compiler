@@ -1,12 +1,12 @@
-﻿using Bumblebee_Compiler.Tokens;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Bumblebee_Compiler {
+namespace Bumblebee_Compiler
+{
 
     /*
      * Declaration statement: 
