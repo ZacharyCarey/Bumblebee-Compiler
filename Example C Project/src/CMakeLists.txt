@@ -1,0 +1,15 @@
+cmake_minimum_required(VERSION 3.30)
+
+project(ExampleC)
+
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+
+add_executable(${PROJECT_NAME} main.c)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR})
+#target_compile_definitions(${PROJECT_NAME} PUBLIC WINDOWS)
+#target_link_libraries(${PROJECT_NAME} PUBLIC ws2_32)
+
+#find_package(Threads REQUIRED)
+#target_link_libraries(${PROJECT_NAME} PUBLIC ${CMAKE_THREADS_LIB_INIT})
