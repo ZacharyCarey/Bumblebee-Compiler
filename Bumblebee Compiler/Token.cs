@@ -58,8 +58,8 @@ namespace Bumblebee_Compiler
         }
     }
 
-    internal class CharLiteralToken : Token {
+    //internal class CharLiteralToken : Token {
 
-    }
+    //}
 
 }
