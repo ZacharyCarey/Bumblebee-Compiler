@@ -4,62 +4,42 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Bumblebee_Compiler
+namespace Bumblebee_Compiler.Tokens
 {
-    internal enum TokenType {
-        EndOfFile = -1,
-        OpenParenthesis,
-        CloseParenthesis,
-        OpenBracket,
-        CloseBracket,
-        Identifier,
-        //Whitespace,
-        Comment,
-        ArgumentSeparator,
-        NumberLiteral,
-        BoolLiteral,
-        CharLiteral,
-        Equals,
-        NotEquals,
-        And,
-        Or,
-        Not,
-        Const,
-        LineDelimiter,
-    }
-
-    internal abstract class Token
+    internal struct Token
     {
-        internal readonly TokenType Type;
-        internal abstract object Value { get; }
 
-        protected Token(TokenType type)
+        internal TokenType Type;
+        internal string Value;
+
+        public Token(TokenType type, string value)
         {
-            Type = type;
+            this.Type = type;
+            this.Value = value;
         }
 
         public override string ToString()
         {
-            object value = this.Value;
-            if (value != null) {
-                return this.Type.ToString() + "[" + value.ToString() + "]";
-            } else {
-                return Type.ToString();
-            }
+            return $"[Type: {Type}, Value: '{Value}']";
         }
     }
 
-    internal abstract class LiteralToken : Token {
-        private readonly object Constant;
-        internal override object Value => Constant;
-
-        protected LiteralToken(TokenType type, object constant) : base(type) {
-            this.Constant = constant;
-        }
+    internal enum TokenType
+    {
+        Paren,
+        Identifier,
+        //Whitespace,
+        Comment,
+        NumberLiteral,
+        BoolLiteral,
+        CharLiteral,
+        LineDelimiter,
+        Operator,
+        Iteration,
+        Selection,
+        ArgumentSeparator,
+        VariableModifier,
+        Indexer,
+        Accessor
     }
-
-    //internal class CharLiteralToken : Token {
-
-    //}
-
 }

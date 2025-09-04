@@ -1,0 +1,9 @@
+// Read the initial seed
+uint8 seed = input;
+
+while(true) {
+	uint8 temp1 = seed ^ (seed >> 1);
+	uint8 temp2 = temp1 ^ (temp1 << 1);
+	seed = temp2 ^ (temp2 >> 2);
+	print(seed % 4);
+}
